@@ -2,7 +2,22 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Oracle — Query attack paths, not rows.</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oracle: a query language whose results are attack paths across identity and network graphs</title>
+  <meta name="description" content="Oracle is a query language whose results are attack paths across identity and network graphs. Ask how a principal reaches a capability and get the exact chain of permissions and trust. AWS IAM attack paths and cloud privilege escalation. By Pavan Nallamothu.">
+  <meta name="author" content="Pavan Nallamothu">
+  <meta name="keywords" content="attack path query language, IAM attack paths, cloud privilege escalation, identity graph, AWS IAM security, lateral movement, attack graph, Pavan Nallamothu">
+  <link rel="canonical" href="https://pavanchow.github.io/oracle/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Oracle: a query language whose results are attack paths across identity and network graphs">
+  <meta property="og:description" content="Ask how a principal reaches a capability. Oracle returns the concrete chain of permissions and trust. AWS IAM attack paths, cloud privilege escalation. By Pavan Nallamothu.">
+  <meta property="og:url" content="https://pavanchow.github.io/oracle/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Oracle: attack paths as the query result">
+  <meta name="twitter:description" content="A query language whose results are attack paths across identity and network graphs. By Pavan Nallamothu.">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Oracle","applicationCategory":"SecurityApplication","operatingSystem":"cross-platform","author":{"@type":"Person","name":"Pavan Nallamothu"},"description":"A query language whose results are attack paths across identity and network graphs.","url":"https://pavanchow.github.io/oracle/","codeRepository":"https://github.com/pavanchow/oracle"}
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #fbfbf9; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -19,6 +34,12 @@
   </noscript>
 </head>
 <body>
+  <noscript>
+    <h1>Oracle: a query language whose results are attack paths across identity and network graphs</h1>
+    <p>Oracle is a query language whose results are attack paths across identity and network graphs, not rows. You ask how a principal can reach a capability, and Oracle returns the concrete chain of permissions and trust that gets them there, hop by hop, with the exact edge behind each step.</p>
+    <p>It imports AWS IAM (get-account-authorization-details) into a graph and answers privilege escalation and lateral movement queries in OQL, the Oracle Query Language. Examples: PATHS FROM user("alice") TO action("*"), ESCALATE FROM role("ci-runner"), BLAST role("deployer").</p>
+    <p>Built in Rust. Source: <a href="https://github.com/pavanchow/oracle">github.com/pavanchow/oracle</a>. By Pavan Nallamothu.</p>
+  </noscript>
   <div id="__bundler_thumbnail">
   <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
     <rect width="1200" height="800" fill="#fbfbf9"></rect>

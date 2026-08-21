@@ -1,6 +1,9 @@
 # Oracle
 
-A query language whose results are attack paths across identity and network graphs rather than plain rows, aimed at surfacing privilege escalation and lateral movement.
+**A query language whose results are attack paths across identity and network graphs.**
+Not rows. You ask how a principal can reach a capability, and Oracle returns the concrete
+chain of permissions and trust that gets them there, aimed at surfacing AWS IAM privilege
+escalation and lateral movement. By Pavan Nallamothu.
 
 You ask how a principal can reach a capability, and Oracle returns the concrete chains of permissions and trust that get them there. See [DESIGN.md](DESIGN.md) for the model, the query language, and the roadmap.
 
