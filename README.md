@@ -145,6 +145,7 @@ Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQ
 parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
 importer, structured JSON query results, exploit-technique detection, and an HTTP
 API with a query-console UI, and an MCP server for agents. `ESCALATE` requires a real
-privilege-boundary crossing, and path search is compute-bounded. Next: Deny/NotAction
-evaluation, and linking a role's resource ARN back to its identity node so PassRole
-escalation surfaces on imported data.
+privilege-boundary crossing, path search is compute-bounded, and a grant whose resource
+ARN is an identity in the account resolves to that identity, so PassRole escalation
+traverses on real imported data. Next: Deny/NotAction evaluation, and mapping Service and
+Federated trust principals so a compromised Lambda assuming its role shows as a path.

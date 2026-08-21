@@ -101,10 +101,13 @@ BLAST role("deployer")
 8. Compute guard (done): `Limits::max_visits` bounds edges examined per search.
 9. MCP server (done): `src/mcp.rs`, stdio JSON-RPC. Tools `oracle_query`,
    `oracle_escalate`, `oracle_graph`. An agent queries attack paths directly.
-10. Importer refinement: link a role's resource ARN (as referenced by iam:PassRole
-    grants) back to its identity node, so permission-edge escalation surfaces on
-    real imported graphs, not only synthetic ones.
+10. Importer identity linkage (done): a grant whose resource ARN is an identity in
+    this account (a role targeted by iam:PassRole, etc.) resolves to that identity
+    node instead of a dead-end resource node, so escalation traverses the final hop
+    on real imported graphs.
 11. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
+12. Trust principals beyond AWS: map `Service` and `Federated` trust to nodes, so a
+    compromised Lambda assuming its trusted role shows up as an attack path.
 
 ## IAM model (implemented, ready for the importer)
 

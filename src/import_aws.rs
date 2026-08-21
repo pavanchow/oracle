@@ -329,10 +329,20 @@ impl<'a> Builder<'a> {
                 };
                 for action in &st.action {
                     for res in &resources {
-                        self.resource_nodes.insert(res.clone());
+                        // If the resource ARN is an identity in this account (e.g. a
+                        // role targeted by iam:PassRole), point the edge at that
+                        // identity node so escalation can traverse the final hop.
+                        // Otherwise it is an opaque resource node keyed by the ARN.
+                        let to = match self.arn_to_id.get(res) {
+                            Some(id) => id.clone(),
+                            None => {
+                                self.resource_nodes.insert(res.clone());
+                                res.clone()
+                            }
+                        };
                         self.edges.push(Edge {
                             from: from.to_string(),
-                            to: res.clone(),
+                            to,
                             kind: "has_permission".into(),
                             action: Some(action.clone()),
                             resource: Some(res.clone()),
@@ -425,5 +435,45 @@ mod tests {
             .iter()
             .any(|e| e.conditions.is_some() && e.resource.is_some());
         assert!(has_conditional);
+    }
+
+    // A real dump where eve holds iam:PassRole on a role in this account. The
+    // grant must connect to the role's identity node, not a dead-end ARN resource,
+    // so escalation can traverse the final hop.
+    const PASSROLE: &str = r#"{
+        "UserDetailList": [
+            { "UserName": "eve", "UserId": "AIDAEVE", "Arn": "arn:aws:iam::123456789012:user/eve",
+              "GroupList": [], "AttachedManagedPolicies": [],
+              "UserPolicyList": [{ "PolicyName": "p", "PolicyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [{ "Effect": "Allow", "Action": "iam:PassRole",
+                                "Resource": "arn:aws:iam::123456789012:role/priv-role" }] } }] }
+        ],
+        "GroupDetailList": [],
+        "RoleDetailList": [
+            { "RoleName": "priv-role", "RoleId": "AROAPRIV",
+              "Arn": "arn:aws:iam::123456789012:role/priv-role",
+              "AssumeRolePolicyDocument": { "Version": "2012-10-17", "Statement": [] },
+              "AttachedManagedPolicies": [], "RolePolicyList": [] }
+        ],
+        "Policies": []
+    }"#;
+
+    #[test]
+    fn passrole_links_to_role_identity() {
+        let doc = import(PASSROLE).unwrap();
+        // The edge targets the role identity node id, not the raw ARN.
+        assert!(doc.edges.iter().any(|e| {
+            e.from == "eve" && e.to == "priv-role" && e.action.as_deref() == Some("iam:PassRole")
+        }));
+        // And escalation surfaces the role identity.
+        let g = Graph::from_json(&doc.to_json_pretty().unwrap()).unwrap();
+        let esc: Vec<String> = g
+            .escalation_from("eve")
+            .unwrap()
+            .into_iter()
+            .map(|n| g.node_label(n))
+            .collect();
+        assert!(esc.iter().any(|s| s == "role:priv-role"));
     }
 }
