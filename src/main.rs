@@ -31,6 +31,9 @@ enum Cmd {
         text: String,
         #[arg(long, default_value = "data/sample-graph.json")]
         graph: String,
+        /// Annotate each path with the exploit techniques it confers.
+        #[arg(long)]
+        techniques: bool,
     },
     /// Import `aws iam get-account-authorization-details` JSON into a graph.
     ImportAws {
@@ -50,7 +53,7 @@ enum Cmd {
     },
 }
 
-fn print_paths(g: &Graph, r: &PathSet) {
+fn print_paths(g: &Graph, r: &PathSet, techniques: bool) {
     if r.paths.is_empty() {
         println!("no attack path found");
         return;
@@ -59,6 +62,14 @@ fn print_paths(g: &Graph, r: &PathSet) {
     println!("{} attack path(s){}:\n", r.paths.len(), note);
     for (i, p) in r.paths.iter().enumerate() {
         println!("[{}] {}", i + 1, g.render_path(p));
+        if techniques {
+            for f in oracle::technique::detect(g, p) {
+                println!(
+                    "      ! [{}] {} via {}: {}",
+                    f.severity, f.technique, f.principal, f.why
+                );
+            }
+        }
     }
 }
 
@@ -67,9 +78,13 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Paths { from, to, graph } => {
             let g = Graph::load(&graph)?;
-            print_paths(&g, &g.paths(&from, &to)?);
+            print_paths(&g, &g.paths(&from, &to)?, false);
         }
-        Cmd::Query { text, graph } => {
+        Cmd::Query {
+            text,
+            graph,
+            techniques,
+        } => {
             let g = Graph::load(&graph)?;
             match parse(&text)? {
                 Query::Paths {
@@ -94,7 +109,7 @@ fn main() -> Result<()> {
                             on_resource.as_deref(),
                         )?,
                     };
-                    print_paths(&g, &r);
+                    print_paths(&g, &r, techniques);
                 }
                 Query::Escalate { from_id, .. } => {
                     // Escalation can land on any identity, not just roles: AWS

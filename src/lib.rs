@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 pub mod import_aws;
 pub mod query;
 pub mod server;
+pub mod technique;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -295,7 +296,39 @@ impl Graph {
         &self.g[idx].kind
     }
 
-    /// One attack path as a JSON value: a start node and edge-labeled hops.
+    pub fn node_id_of(&self, idx: NodeIndex) -> &str {
+        &self.g[idx].id
+    }
+
+    /// Actions this node grants directly (its outgoing `has_permission` edges).
+    pub fn granted_actions(&self, idx: NodeIndex) -> Vec<&str> {
+        self.g
+            .edges_directed(idx, Outgoing)
+            .filter(|e| e.weight().kind == "has_permission")
+            .filter_map(|e| e.weight().action.as_deref())
+            .collect()
+    }
+
+    /// Every principal (user/group/role) an attacker gains along a path: the
+    /// start plus each identity landed on. Techniques reason over these.
+    pub fn path_principals(&self, p: &AttackPath) -> Vec<NodeIndex> {
+        let is_principal = |k: &str| matches!(k, "user" | "group" | "role");
+        let mut out = Vec::new();
+        if is_principal(self.node_kind_of(p.start)) {
+            out.push(p.start);
+        }
+        for s in &p.steps {
+            if is_principal(self.node_kind_of(s.to)) {
+                out.push(s.to);
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// One attack path as a JSON value: a start node, edge-labeled hops, and any
+    /// exploit techniques the path confers.
     pub fn path_json(&self, p: &AttackPath) -> serde_json::Value {
         let hops: Vec<serde_json::Value> = p
             .steps
@@ -311,7 +344,11 @@ impl Graph {
                 })
             })
             .collect();
-        serde_json::json!({ "start": self.node_label(p.start), "hops": hops })
+        serde_json::json!({
+            "start": self.node_label(p.start),
+            "hops": hops,
+            "techniques": crate::technique::detect(self, p),
+        })
     }
 
     /// Parse and run an OQL query, returning a structured JSON result. Shared by
@@ -450,7 +487,7 @@ impl Graph {
 
 /// Does an edge granting `grant` satisfy a query for `query`? Both sides may use
 /// a trailing `*`. A `*` grant covers any queried action; `s3:*` covers `s3:X`.
-fn action_matches(query: &str, grant: &str) -> bool {
+pub fn action_matches(query: &str, grant: &str) -> bool {
     if query == "*" {
         return true;
     }

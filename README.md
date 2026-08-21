@@ -50,6 +50,27 @@ The importer builds users, groups, roles and resource nodes, `member_of` edges,
 action, resource ARN, and any `Condition` block. `Deny` and `NotAction`/`NotResource`
 are not evaluated yet, so results are potential paths.
 
+## Techniques
+
+Reachability is noise. Oracle names the exploit primitive an attack path confers,
+by inspecting the permissions each principal the path yields actually holds:
+
+```
+cargo run -- query 'PATHS FROM user("alice") TO action("*")' \
+  --graph aws-graph.json --techniques
+```
+
+```
+[3] user:alice --[can_assume ...]--> role:deployer --[has_permission s3:PutObject ...]-->
+      ! [medium] Object write (possible code execution) via role:deployer: ...
+```
+
+Detected today: full admin (`*`), Lambda code injection (`lambda:UpdateFunctionCode`
++ `iam:PassRole`, RCE), `iam:PassRole` privilege escalation, account takeover
+(`iam:UpdateLoginProfile` / `iam:CreateAccessKey`), policy injection
+(`iam:CreatePolicyVersion` / `Put*Policy`), and object write. The HTTP API returns a
+`techniques` array on every path.
+
 ## HTTP API
 
 Serve the engine over HTTP so a UI or an agent can query it:
@@ -96,6 +117,7 @@ JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
 
 Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
 parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
-importer, structured JSON query results, and an HTTP API. Next: a graph
-visualization UI on top of the API, Deny/NotAction evaluation and
-escalation-technique rules, then an MCP server.
+importer, structured JSON query results, exploit-technique detection, and an HTTP
+API. Next: a graph visualization UI on top of the API, an `ESCALATE`
+privilege-boundary fix, a per-request compute guard on the API, then Deny/NotAction
+evaluation and an MCP server.

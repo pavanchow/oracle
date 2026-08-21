@@ -90,9 +90,18 @@ BLAST role("deployer")
    and emits the graph. See `src/import_aws.rs` and `data/aws-authdetails-sample.json`.
 4. HTTP API (done): axum server, `run_oql` returns structured JSON. `GET /health`,
    `GET /graph`, `POST /query`. See `src/server.rs`.
-5. Graph visualization UI on top of the API.
-6. Deny/NotAction evaluation and escalation-technique rules (auto-detect bundles).
-7. MCP server for agent access.
+5. Exploit-technique detection (done): `src/technique.rs`. Techniques are evaluated
+   over the principals a path yields, inspecting the permissions each holds. They are
+   NOT baked into the graph as synthetic nodes, so the graph stays pure and detection
+   works on real importer output. Every path carries a `techniques` array.
+6. Graph visualization UI on top of the API.
+7. `ESCALATE` privilege-boundary fix (require a `can_assume` hop or a strictly
+   higher-privilege target; today it is filtered reachability).
+8. Per-request compute guard on the HTTP API (a visit budget or timeout; path
+   enumeration is exponential in the worst case). The server binds to 127.0.0.1, so
+   this is not yet remotely exploitable, but it is required before public deployment.
+9. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
+10. MCP server for agent access.
 
 ## IAM model (implemented, ready for the importer)
 
