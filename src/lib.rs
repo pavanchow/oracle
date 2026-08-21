@@ -283,9 +283,10 @@ impl Graph {
         })
     }
 
-    /// Identities reachable via a path that crosses a privilege boundary, i.e.
-    /// that traverses at least one `can_assume` edge. Plain reachability to your
-    /// own group is not escalation, so this is not just a filtered `BLAST`.
+    /// Identities reachable via a path that crosses a privilege boundary. A
+    /// boundary is a `can_assume` hop (role assumption) or a `has_permission` grant
+    /// of an escalation primitive (iam:PassRole, iam:CreatePolicyVersion, etc.).
+    /// Plain reachability to your own group is not escalation.
     pub fn escalation_from(&self, from: &str) -> Result<Vec<NodeIndex>> {
         let start = self.node_id(from)?;
         // BFS over (node, crossed_a_boundary) states.
@@ -298,7 +299,13 @@ impl Graph {
         while let Some((cur, crossed)) = q.pop_front() {
             for e in self.g.edges_directed(cur, Outgoing) {
                 let next = e.target();
-                let ncross = crossed || e.weight().kind == "can_assume";
+                let boundary = e.weight().kind == "can_assume"
+                    || (e.weight().kind == "has_permission"
+                        && e.weight()
+                            .action
+                            .as_deref()
+                            .is_some_and(crate::technique::is_escalation_action));
+                let ncross = crossed || boundary;
                 if seen.insert((next, ncross)) {
                     if ncross
                         && next != start
@@ -786,6 +793,25 @@ mod tests {
         assert!(esc.iter().any(|s| s == "role:admin"));
         // contractor only has member_of into its own group. That is not escalation.
         assert!(g.escalation_from("contractor").unwrap().is_empty());
+    }
+
+    #[test]
+    fn escalation_via_passrole_permission() {
+        // No can_assume anywhere: escalation is via an iam:PassRole grant.
+        let j = r#"{
+            "nodes":[{"id":"alice","kind":"user"},{"id":"devs","kind":"group"},{"id":"target-role","kind":"role"}],
+            "edges":[
+                {"from":"alice","to":"devs","kind":"member_of"},
+                {"from":"devs","to":"target-role","kind":"has_permission","action":"iam:PassRole"}
+            ]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let esc: Vec<String> = g
+            .escalation_from("alice")
+            .unwrap()
+            .into_iter()
+            .map(|n| g.node_label(n))
+            .collect();
+        assert!(esc.iter().any(|s| s == "role:target-role"));
     }
 
     #[test]

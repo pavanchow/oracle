@@ -13,6 +13,26 @@
 use crate::{action_matches, AttackPath, Graph};
 use serde::Serialize;
 
+/// IAM actions that, held by a principal, let it gain privileges it did not have.
+/// Shared with the graph engine so `ESCALATE` and technique detection agree.
+pub const ESCALATION_ACTIONS: &[&str] = &[
+    "iam:PassRole",
+    "iam:CreatePolicyVersion",
+    "iam:PutUserPolicy",
+    "iam:PutRolePolicy",
+    "iam:AttachUserPolicy",
+    "iam:AttachRolePolicy",
+    "iam:UpdateLoginProfile",
+    "iam:CreateAccessKey",
+    "lambda:UpdateFunctionCode",
+];
+
+/// Does this granted action confer an escalation primitive? A `*` grant does,
+/// and so does any grant covering one of the actions above.
+pub fn is_escalation_action(grant: &str) -> bool {
+    grant == "*" || ESCALATION_ACTIONS.iter().any(|prim| action_matches(prim, grant))
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct Finding {
     pub technique: String,
@@ -86,14 +106,9 @@ pub fn detect(g: &Graph, p: &AttackPath) -> Vec<Finding> {
                 "can rewrite an attached policy to grant itself more",
             );
         }
-
-        if holds(&actions, "s3:PutObject") {
-            add(
-                "Object write (possible code execution)",
-                "medium",
-                "can write objects; RCE if a bucket has a Lambda or pipeline trigger",
-            );
-        }
+        // s3:PutObject as "code execution" needs a Lambda/pipeline trigger on the
+        // bucket to be real. The graph model does not encode triggers yet, so
+        // flagging every write is noise. This returns once triggers are modeled.
     }
 
     let rank = |s: &str| match s {

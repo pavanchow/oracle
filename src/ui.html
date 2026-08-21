@@ -78,7 +78,7 @@ const EXAMPLES = [
 const out = document.getElementById('out');
 const qInput = document.getElementById('q');
 
-function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function kind(label){ return label.split(':')[0]; }
 function pill(label){ return `<span class="pill k-${esc(kind(label))}">${esc(label)}</span>`; }
 
