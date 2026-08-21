@@ -1,8 +1,11 @@
-use anyhow::{Context, Result};
-use petgraph::algo::all_simple_paths;
-use petgraph::graph::{DiGraph, NodeIndex};
+use anyhow::{bail, Context, Result};
+use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use petgraph::visit::{Bfs, EdgeRef};
+use petgraph::Direction::Outgoing;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+pub mod query;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Node {
@@ -27,7 +30,50 @@ struct RawGraph {
     edges: Vec<Edge>,
 }
 
-/// An in-memory identity/network graph with id lookup.
+/// One hop in an attack path: the exact edge taken and the node it lands on.
+#[derive(Debug, Clone, Copy)]
+pub struct Step {
+    pub edge: EdgeIndex,
+    pub to: NodeIndex,
+}
+
+/// A concrete attack path: a start node and the edges walked from it.
+#[derive(Debug, Clone)]
+pub struct AttackPath {
+    pub start: NodeIndex,
+    pub steps: Vec<Step>,
+}
+
+impl AttackPath {
+    pub fn hops(&self) -> usize {
+        self.steps.len()
+    }
+}
+
+/// Bounds on path search. Real attack paths are short, and enumeration is
+/// exponential in the worst case, so both a depth and a result cap are enforced.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub max_depth: usize,
+    pub max_results: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_depth: 8,
+            max_results: 1000,
+        }
+    }
+}
+
+pub struct PathSet {
+    pub paths: Vec<AttackPath>,
+    /// True if a cap was hit and some paths were not returned.
+    pub truncated: bool,
+}
+
+/// An in-memory identity/network graph with unique-id lookup.
 pub struct Graph {
     g: DiGraph<Node, Edge>,
     index: HashMap<String, NodeIndex>,
@@ -45,6 +91,10 @@ impl Graph {
         let mut g = DiGraph::<Node, Edge>::new();
         let mut index = HashMap::new();
         for n in raw.nodes {
+            // Duplicate ids would silently resolve queries to the wrong node.
+            if index.contains_key(&n.id) {
+                bail!("duplicate node id `{}`", n.id);
+            }
             let id = n.id.clone();
             let idx = g.add_node(n);
             index.insert(id, idx);
@@ -68,41 +118,204 @@ impl Graph {
             .with_context(|| format!("no node with id {id}"))
     }
 
-    /// Every simple attack path from one node to another.
-    pub fn paths(&self, from: &str, to: &str) -> Result<Vec<Vec<NodeIndex>>> {
-        let a = self.node_id(from)?;
-        let b = self.node_id(to)?;
-        Ok(all_simple_paths::<Vec<_>, _>(&self.g, a, b, 0, None).collect())
+    /// Attack paths from one node to another, under the default limits.
+    pub fn paths(&self, from: &str, to: &str) -> Result<PathSet> {
+        self.paths_with(from, to, Limits::default())
     }
 
-    /// Render one path as a readable chain with the edge that enabled each hop.
-    pub fn render_path(&self, path: &[NodeIndex]) -> String {
-        if path.is_empty() {
-            return String::new();
+    /// Attack paths from one node to another, under explicit limits.
+    pub fn paths_with(&self, from: &str, to: &str, limits: Limits) -> Result<PathSet> {
+        let start = self.node_id(from)?;
+        let target = self.node_id(to)?;
+        let mut out = Vec::new();
+        let mut truncated = false;
+        let mut visited = HashSet::new();
+        let mut steps = Vec::new();
+        self.walk(
+            start,
+            start,
+            target,
+            &mut visited,
+            &mut steps,
+            &mut out,
+            &limits,
+            &mut truncated,
+        );
+        Ok(PathSet {
+            paths: out,
+            truncated,
+        })
+    }
+
+    /// Attack paths from a node to any node reachable via an edge whose granted
+    /// action satisfies the pattern (e.g. `action("*")` = who can reach full control).
+    pub fn paths_to_action(&self, from: &str, pattern: &str) -> Result<PathSet> {
+        self.paths_to_action_with(from, pattern, Limits::default())
+    }
+
+    pub fn paths_to_action_with(
+        &self,
+        from: &str,
+        pattern: &str,
+        limits: Limits,
+    ) -> Result<PathSet> {
+        let start = self.node_id(from)?;
+        let mut out = Vec::new();
+        let mut truncated = false;
+        for target in self.action_targets(pattern) {
+            if target == start {
+                continue;
+            }
+            let mut visited = HashSet::new();
+            let mut steps = Vec::new();
+            self.walk(
+                start,
+                start,
+                target,
+                &mut visited,
+                &mut steps,
+                &mut out,
+                &limits,
+                &mut truncated,
+            );
+            if truncated {
+                break;
+            }
         }
-        let label = |idx: NodeIndex| {
-            let n = &self.g[idx];
-            format!("{}:{}", n.kind, n.id)
-        };
-        let mut out = label(path[0]);
-        for w in path.windows(2) {
-            let edge = self.g.find_edge(w[0], w[1]).map(|e| {
-                let ed = &self.g[e];
-                match &ed.action {
-                    Some(a) => format!("{} {}", ed.kind, a),
-                    None => ed.kind.clone(),
-                }
-            });
-            out.push_str(&format!(" --[{}]--> {}", edge.unwrap_or_default(), label(w[1])));
+        Ok(PathSet {
+            paths: out,
+            truncated,
+        })
+    }
+
+    /// Every node reachable from a start node (bounded, one visit per node).
+    pub fn reachable_from(&self, from: &str) -> Result<Vec<NodeIndex>> {
+        let start = self.node_id(from)?;
+        let mut bfs = Bfs::new(&self.g, start);
+        let mut out = Vec::new();
+        while let Some(nx) = bfs.next(&self.g) {
+            if nx != start {
+                out.push(nx);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn node_label(&self, idx: NodeIndex) -> String {
+        let n = &self.g[idx];
+        format!("{}:{}", n.kind, n.id)
+    }
+
+    pub fn node_kind_of(&self, idx: NodeIndex) -> &str {
+        &self.g[idx].kind
+    }
+
+    /// Render one attack path, showing the exact edge that enabled each hop.
+    pub fn render_path(&self, p: &AttackPath) -> String {
+        let mut out = self.node_label(p.start);
+        for s in &p.steps {
+            let ed = &self.g[s.edge];
+            let label = match &ed.action {
+                Some(a) => format!("{} {}", ed.kind, a),
+                None => ed.kind.clone(),
+            };
+            out.push_str(&format!(" --[{}]--> {}", label, self.node_label(s.to)));
         }
         out
     }
+
+    /// Depth-first enumeration of simple paths that carries the exact edge for
+    /// each hop (so parallel edges stay distinct) and honors both caps.
+    #[allow(clippy::too_many_arguments)]
+    fn walk(
+        &self,
+        start: NodeIndex,
+        cur: NodeIndex,
+        target: NodeIndex,
+        visited: &mut HashSet<NodeIndex>,
+        steps: &mut Vec<Step>,
+        out: &mut Vec<AttackPath>,
+        limits: &Limits,
+        truncated: &mut bool,
+    ) {
+        if out.len() >= limits.max_results {
+            *truncated = true;
+            return;
+        }
+        if steps.len() >= limits.max_depth {
+            return;
+        }
+        for e in self.g.edges_directed(cur, Outgoing) {
+            let next = e.target();
+            // Simple paths only: never revisit the start or an in-path node.
+            if next == start || visited.contains(&next) {
+                continue;
+            }
+            steps.push(Step {
+                edge: e.id(),
+                to: next,
+            });
+            if next == target {
+                out.push(AttackPath {
+                    start,
+                    steps: steps.clone(),
+                });
+                if out.len() >= limits.max_results {
+                    *truncated = true;
+                    steps.pop();
+                    return;
+                }
+            } else {
+                visited.insert(next);
+                self.walk(start, next, target, visited, steps, out, limits, truncated);
+                visited.remove(&next);
+            }
+            steps.pop();
+        }
+    }
+
+    fn action_targets(&self, pattern: &str) -> Vec<NodeIndex> {
+        let mut set = std::collections::BTreeSet::new();
+        for e in self.g.edge_indices() {
+            if let Some(action) = &self.g[e].action {
+                if action_matches(pattern, action) {
+                    if let Some((_, to)) = self.g.edge_endpoints(e) {
+                        set.insert(to);
+                    }
+                }
+            }
+        }
+        set.into_iter().collect()
+    }
+}
+
+/// Does an edge granting `grant` satisfy a query for `query`? Both sides may use
+/// a trailing `*`. A `*` grant covers any queried action; `s3:*` covers `s3:X`.
+fn action_matches(query: &str, grant: &str) -> bool {
+    if query == "*" {
+        return true;
+    }
+    if let Some(qpfx) = query.strip_suffix('*') {
+        return grant.starts_with(qpfx)
+            || grant == "*"
+            || grant
+                .strip_suffix('*')
+                .is_some_and(|gpfx| qpfx.starts_with(gpfx));
+    }
+    if grant == query || grant == "*" {
+        return true;
+    }
+    if let Some(gpfx) = grant.strip_suffix('*') {
+        return query.starts_with(gpfx);
+    }
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // alice -can_assume-> admin -has_permission *-> all
     const SAMPLE: &str = r#"{
         "nodes": [
             {"id": "alice", "kind": "user"},
@@ -118,15 +331,97 @@ mod tests {
     #[test]
     fn finds_the_escalation_path() {
         let g = Graph::from_json(SAMPLE).unwrap();
-        let paths = g.paths("alice", "all").unwrap();
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].len(), 3);
+        let r = g.paths("alice", "all").unwrap();
+        assert_eq!(r.paths.len(), 1);
+        assert_eq!(r.paths[0].hops(), 2);
+        assert!(!r.truncated);
     }
 
     #[test]
     fn no_path_when_unreachable() {
         let g = Graph::from_json(SAMPLE).unwrap();
-        let paths = g.paths("all", "alice").unwrap();
-        assert!(paths.is_empty());
+        assert!(g.paths("all", "alice").unwrap().paths.is_empty());
+    }
+
+    #[test]
+    fn unknown_node_errors() {
+        let g = Graph::from_json(SAMPLE).unwrap();
+        assert!(g.paths("nope", "all").is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_ids() {
+        let j = r#"{"nodes":[{"id":"x","kind":"user"},{"id":"x","kind":"role"}],"edges":[]}"#;
+        assert!(Graph::from_json(j).is_err());
+    }
+
+    #[test]
+    fn parallel_edges_render_distinctly() {
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"role"}],
+            "edges":[
+                {"from":"a","to":"b","kind":"can_assume","action":"sts:AssumeRole"},
+                {"from":"a","to":"b","kind":"trusts","action":"cross-account"}
+            ]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let r = g.paths("a", "b").unwrap();
+        assert_eq!(r.paths.len(), 2);
+        let rendered: Vec<String> = r.paths.iter().map(|p| g.render_path(p)).collect();
+        assert!(rendered.iter().any(|s| s.contains("can_assume")));
+        assert!(rendered.iter().any(|s| s.contains("trusts")));
+        assert_ne!(rendered[0], rendered[1]);
+    }
+
+    #[test]
+    fn respects_max_depth() {
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"role"},
+                     {"id":"c","kind":"role"},{"id":"d","kind":"resource"}],
+            "edges":[{"from":"a","to":"b","kind":"x"},
+                     {"from":"b","to":"c","kind":"x"},
+                     {"from":"c","to":"d","kind":"x"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let shallow = g
+            .paths_with("a", "d", Limits { max_depth: 2, max_results: 1000 })
+            .unwrap();
+        assert!(shallow.paths.is_empty());
+        let deep = g
+            .paths_with("a", "d", Limits { max_depth: 8, max_results: 1000 })
+            .unwrap();
+        assert_eq!(deep.paths.len(), 1);
+        assert_eq!(deep.paths[0].hops(), 3);
+    }
+
+    #[test]
+    fn cap_sets_truncated() {
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"role"}],
+            "edges":[{"from":"a","to":"b","kind":"x"},{"from":"a","to":"b","kind":"y"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let r = g
+            .paths_with("a", "b", Limits { max_depth: 8, max_results: 1 })
+            .unwrap();
+        assert_eq!(r.paths.len(), 1);
+        assert!(r.truncated);
+    }
+
+    #[test]
+    fn no_self_path_for_same_node() {
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"role"}],
+            "edges":[{"from":"a","to":"a","kind":"member_of"},
+                     {"from":"a","to":"b","kind":"x"},
+                     {"from":"b","to":"a","kind":"x"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        assert!(g.paths("a", "a").unwrap().paths.is_empty());
+    }
+
+    #[test]
+    fn action_glob_matches() {
+        assert!(action_matches("s3:GetObject", "*"));
+        assert!(action_matches("s3:GetObject", "s3:*"));
+        assert!(action_matches("s3:*", "s3:GetObject"));
+        assert!(action_matches("*", "iam:PassRole"));
+        assert!(!action_matches("s3:GetObject", "ec2:*"));
     }
 }

@@ -15,26 +15,46 @@ cargo test
 
 The repo ships a synthetic identity graph in `data/sample-graph.json`.
 
-```
-cargo run -- paths --from alice --to all-resources
-```
+Query it in OQL, the Oracle Query Language:
 
 ```
-1 attack path(s) from alice to all-resources:
+cargo run -- query 'PATHS FROM user("alice") TO action("*")'
+cargo run -- query 'PATHS FROM user("alice") TO resource("prod-artifacts")'
+cargo run -- query 'ESCALATE FROM user("alice")'
+cargo run -- query 'BLAST role("deployer")'
+```
 
+Example output:
+
+```
 [1] user:alice --[member_of]--> group:developers --[can_assume sts:AssumeRole]-->
     role:build-runner --[can_assume sts:AssumeRole]--> role:deployer
     --[has_permission iam:PutRolePolicy]--> role:admin --[has_permission *]-->
     resource:all-resources
 ```
 
+The raw path command is still there: `cargo run -- paths --from alice --to all-resources`.
+
+## OQL
+
+- `PATHS FROM <node> TO <node>` every attack path between two nodes.
+- `PATHS FROM <node> TO action("<pattern>")` paths to any capability matching the
+  action (glob: `*`, `s3:*`, exact). Answers "who can reach full control".
+- `ESCALATE FROM <node>` roles reachable from a principal.
+- `BLAST <node>` everything a node can reach.
+
+A node is `kind("id")`, e.g. `user("alice")`, `role("deployer")`.
+
 ## Stack
 
-Rust. `petgraph` for the graph engine, `serde` over a portable JSON graph
-format, `clap` for the CLI. Parser (`chumsky`), storage, HTTP API, graph
-visualization, and an MCP server come next per the roadmap in DESIGN.md.
+Rust. A hand-written OQL lexer and recursive-descent parser (no combinator
+dependency, this is our language). `petgraph` for the graph, a custom
+depth-capped DFS that carries the exact edge per hop, `serde` over a portable
+JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
+1000 results) with a truncation flag, so a dense graph cannot blow up.
 
 ## Status
 
-Foundation working: graph model, JSON loader, attack-path enumeration, and a CLI.
-Query language parser is the next slice.
+Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
+parser (`PATHS`, `ESCALATE`, `BLAST`), and a CLI. Next: AWS IAM importer, then the
+HTTP API and the graph visualization UI, then an MCP server.

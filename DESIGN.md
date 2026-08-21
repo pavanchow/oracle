@@ -65,12 +65,25 @@ The foundation ships the engine and a CLI surface; the parser is the next slice.
 
 ## Roadmap
 
-1. Foundation (this slice): graph model, JSON loader, path enumeration, CLI.
-2. OQL parser with `chumsky`, real query surface.
-3. Escalation and blast-radius queries, edge conditions.
-4. AWS IAM importer.
+1. Foundation (done): graph model, JSON loader, edge-aware bounded path engine, CLI.
+2. OQL parser (done): hand-written lexer + recursive descent. `PATHS`, `ESCALATE`,
+   `BLAST`, node and `action(...)` targets. No combinator dependency, this is our
+   language.
+3. Edge conditions and hop limits in the query surface (`WITHIN n HOPS`).
+4. AWS IAM importer into the JSON model.
 5. axum API, then the graph visualization UI.
 6. MCP server for agent access.
+
+## Safety and correctness notes
+
+- Node ids must be unique; the loader rejects duplicates (a duplicate would
+  silently resolve a query to the wrong node, a false negative on a security graph).
+- Path search is bounded by `Limits { max_depth, max_results }` (default 8 hops,
+  1000 results) and reports `truncated` when a cap is hit. Simple-path enumeration
+  is exponential in the worst case, so unbounded search is a DoS vector, especially
+  once the HTTP API and MCP server ship.
+- Paths carry the exact edge taken per hop, so parallel edges (a principal that can
+  both `can_assume` and `has_permission` on the same role) stay distinct.
 
 ## Data format
 
