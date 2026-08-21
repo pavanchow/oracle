@@ -67,7 +67,7 @@ pub fn detect(g: &Graph, p: &AttackPath) -> Vec<Finding> {
         // of "*" matches every grant, which would flag any permission as admin.)
         // Admin implies every primitive, so report it alone and skip the rest,
         // otherwise an admin principal drowns the operator in redundant findings.
-        if actions.iter().any(|grant| *grant == "*") {
+        if actions.contains(&"*") {
             add("Full administrative access", "critical", "holds action *");
             continue;
         }
