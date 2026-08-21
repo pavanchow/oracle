@@ -99,8 +99,12 @@ BLAST role("deployer")
 7. `ESCALATE` privilege-boundary fix (done): `escalation_from` requires a `can_assume`
    hop, so reaching your own group is no longer reported as escalation.
 8. Compute guard (done): `Limits::max_visits` bounds edges examined per search.
-9. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
-10. MCP server for agent access.
+9. MCP server (done): `src/mcp.rs`, stdio JSON-RPC. Tools `oracle_query`,
+   `oracle_escalate`, `oracle_graph`. An agent queries attack paths directly.
+10. Importer refinement: link a role's resource ARN (as referenced by iam:PassRole
+    grants) back to its identity node, so permission-edge escalation surfaces on
+    real imported graphs, not only synthetic ones.
+11. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
 
 ## IAM model (implemented, ready for the importer)
 

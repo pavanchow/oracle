@@ -93,6 +93,24 @@ curl -s localhost:8080/query -H 'content-type: application/json' \
 Path search is bounded by a visit budget (`Limits::max_visits`), so a dense graph
 cannot pin the CPU per request.
 
+## MCP server (agent-native)
+
+Expose Oracle to an AI agent over the Model Context Protocol (stdio JSON-RPC):
+
+```
+cargo run -- mcp --graph aws-graph.json
+```
+
+Register it with an MCP client, e.g. Claude Code:
+
+```
+claude mcp add oracle -- /path/to/oracle mcp --graph /path/to/aws-graph.json
+```
+
+Tools: `oracle_query` (run any OQL), `oracle_escalate` (escalation targets for a
+principal), `oracle_graph` (the loaded graph). An agent can ask "how does this
+principal reach admin" and get a walkable attack path back as structured JSON.
+
 ## OQL
 
 - `PATHS FROM <node> TO <node>` every attack path between two nodes.
@@ -126,5 +144,7 @@ JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
 Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
 parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
 importer, structured JSON query results, exploit-technique detection, and an HTTP
-API with a query-console UI. `ESCALATE` requires a real privilege-boundary crossing,
-and path search is compute-bounded. Next: Deny/NotAction evaluation, then an MCP server.
+API with a query-console UI, and an MCP server for agents. `ESCALATE` requires a real
+privilege-boundary crossing, and path search is compute-bounded. Next: Deny/NotAction
+evaluation, and linking a role's resource ARN back to its identity node so PassRole
+escalation surfaces on imported data.

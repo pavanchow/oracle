@@ -51,6 +51,11 @@ enum Cmd {
         #[arg(long, default_value_t = 8080)]
         port: u16,
     },
+    /// Run as an MCP server over stdio so an agent can query attack paths.
+    Mcp {
+        #[arg(long, default_value = "data/sample-graph.json")]
+        graph: String,
+    },
 }
 
 fn print_paths(g: &Graph, r: &PathSet, techniques: bool) {
@@ -158,6 +163,9 @@ fn main() -> Result<()> {
         }
         Cmd::Serve { graph, port } => {
             oracle::server::serve(&graph, port)?;
+        }
+        Cmd::Mcp { graph } => {
+            oracle::mcp::serve_mcp(&graph)?;
         }
     }
     Ok(())

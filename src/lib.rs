@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub mod import_aws;
+pub mod mcp;
 pub mod query;
 pub mod server;
 pub mod technique;
