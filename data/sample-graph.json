@@ -1,0 +1,19 @@
+{
+  "nodes": [
+    { "id": "alice", "kind": "user" },
+    { "id": "developers", "kind": "group" },
+    { "id": "build-runner", "kind": "role" },
+    { "id": "deployer", "kind": "role" },
+    { "id": "admin", "kind": "role" },
+    { "id": "prod-artifacts", "kind": "resource" },
+    { "id": "all-resources", "kind": "resource" }
+  ],
+  "edges": [
+    { "from": "alice", "to": "developers", "kind": "member_of" },
+    { "from": "developers", "to": "build-runner", "kind": "can_assume", "action": "sts:AssumeRole" },
+    { "from": "build-runner", "to": "deployer", "kind": "can_assume", "action": "sts:AssumeRole" },
+    { "from": "deployer", "to": "prod-artifacts", "kind": "has_permission", "action": "s3:*" },
+    { "from": "deployer", "to": "admin", "kind": "has_permission", "action": "iam:PutRolePolicy" },
+    { "from": "admin", "to": "all-resources", "kind": "has_permission", "action": "*" }
+  ]
+}
