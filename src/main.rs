@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use oracle::query::{parse, Query, Target};
-use oracle::{Graph, PathSet};
+use oracle::{Graph, Limits, PathSet};
 
 #[derive(Parser)]
 #[command(
@@ -56,24 +56,38 @@ fn main() -> Result<()> {
         Cmd::Query { text, graph } => {
             let g = Graph::load(&graph)?;
             match parse(&text)? {
-                Query::Paths { from_id, to, .. } => {
+                Query::Paths {
+                    from_id,
+                    to,
+                    via,
+                    within,
+                    ..
+                } => {
+                    let mut limits = Limits::default();
+                    if let Some(h) = within {
+                        limits.max_depth = h;
+                    }
                     let r = match to {
-                        Target::Node { id, .. } => g.paths(&from_id, &id)?,
-                        Target::Action(pat) => g.paths_to_action(&from_id, &pat)?,
+                        Target::Node { id, .. } => g.paths_with(&from_id, &id, limits, &via)?,
+                        Target::Action(pat) => {
+                            g.paths_to_action_with(&from_id, &pat, limits, &via)?
+                        }
                     };
                     print_paths(&g, &r);
                 }
                 Query::Escalate { from_id, .. } => {
-                    let roles: Vec<_> = g
+                    // Escalation can land on any identity, not just roles: AWS
+                    // privilege escalation loops back to users and groups too.
+                    let principals: Vec<_> = g
                         .reachable_from(&from_id)?
                         .into_iter()
-                        .filter(|&n| g.node_kind_of(n) == "role")
+                        .filter(|&n| matches!(g.node_kind_of(n), "user" | "group" | "role"))
                         .collect();
-                    if roles.is_empty() {
-                        println!("no roles reachable from {from_id}");
+                    if principals.is_empty() {
+                        println!("no identities reachable from {from_id}");
                     } else {
-                        println!("{} role(s) reachable from {from_id}:", roles.len());
-                        for n in roles {
+                        println!("{} identit(ies) reachable from {from_id}:", principals.len());
+                        for n in principals {
                             println!("  {}", g.node_label(n));
                         }
                     }

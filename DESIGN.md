@@ -63,16 +63,47 @@ The foundation ships the engine and a CLI surface; the parser is the next slice.
 - **MCP server (later):** expose Oracle so agents can query attack paths directly.
 - **Importers (later):** AWS IAM, then GCP and network sources, into the JSON model.
 
+## Query language (OQL v2)
+
+```
+PATHS FROM user("alice") TO resource("prod")
+PATHS FROM user("alice") TO action("s3:*")
+PATHS FROM user("alice") TO action("*") VIA can_assume, has_permission WITHIN 4 HOPS
+ESCALATE FROM user("alice")
+BLAST role("deployer")
+```
+
+- `VIA <kind>[, <kind>...]` restricts traversal to those edge kinds.
+- `WITHIN n HOPS` caps path length in the language (not just the CLI default).
+- `action("P")` returns paths that END on an edge whose grant satisfies `P` under
+  glob (`*`, `s3:*`, exact). The final hop always grants the queried action, so a
+  path can never be mislabeled with an action it does not actually confer.
+- `ESCALATE` returns every reachable identity (user, group, role), since real
+  privilege escalation loops back through users and groups, not only roles.
+
 ## Roadmap
 
 1. Foundation (done): graph model, JSON loader, edge-aware bounded path engine, CLI.
 2. OQL parser (done): hand-written lexer + recursive descent. `PATHS`, `ESCALATE`,
-   `BLAST`, node and `action(...)` targets. No combinator dependency, this is our
-   language.
-3. Edge conditions and hop limits in the query surface (`WITHIN n HOPS`).
-4. AWS IAM importer into the JSON model.
-5. axum API, then the graph visualization UI.
-6. MCP server for agent access.
+   `BLAST`, node and `action(...)` targets, `VIA` edge filter, `WITHIN n HOPS`.
+3. AWS IAM importer into the JSON model (see model decisions below).
+4. axum API, then the graph visualization UI.
+5. MCP server for agent access.
+
+## Model decisions for the AWS IAM importer (locked)
+
+These were surfaced before building the importer so the model is right from the start:
+
+- **Policies are first-class nodes** (`kind: "policy"`), not flattened. Paths read
+  `user -> policy -> resource`, which keeps remediation context (revoke *this* policy).
+- **Resource ARN globbing.** Grants apply to resource ARNs with wildcards, so the
+  importer needs a `resource_matches` mirroring `action_matches`.
+- **Condition keys.** IAM `Condition` blocks (MFA, source IP, etc.) will be carried on
+  edges (an optional `conditions` field). A path gated by an unmet condition is flagged
+  conditional rather than reported as a clean win, to avoid false positives.
+- **AND-logic (hyperedges).** Some escalations need multiple grants at once
+  (`lambda:UpdateFunctionCode` AND `iam:PassRole`). A plain directed edge is OR-logic,
+  so the importer will model multi-grant actions as a requirement group, not a single edge.
 
 ## Safety and correctness notes
 
@@ -84,6 +115,8 @@ The foundation ships the engine and a CLI surface; the parser is the next slice.
   once the HTTP API and MCP server ship.
 - Paths carry the exact edge taken per hop, so parallel edges (a principal that can
   both `can_assume` and `has_permission` on the same role) stay distinct.
+- `action(...)` paths end on the matching edge, so the reported path genuinely
+  grants the queried action.
 
 ## Data format
 

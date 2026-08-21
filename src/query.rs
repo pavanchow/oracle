@@ -1,16 +1,20 @@
 //! OQL, the Oracle Query Language. A small hand-written lexer and recursive
 //! descent parser. No parser-combinator dependency: this is our language.
 //!
-//! Grammar (v1):
+//! Grammar (v2):
 //!   query     := paths | escalate | blast
-//!   paths     := "PATHS" "FROM" node_ref "TO" target
+//!   paths     := "PATHS" "FROM" node_ref "TO" target clause*
 //!   escalate  := "ESCALATE" "FROM" node_ref
 //!   blast     := "BLAST" node_ref
-//!   node_ref  := WORD "(" STRING ")"          e.g. user("alice")
+//!   node_ref  := WORD "(" STRING ")"            e.g. user("alice")
 //!   target    := node_ref | action_ref
-//!   action_ref:= "action" "(" STRING ")"       e.g. action("*")
+//!   action_ref:= "action" "(" STRING ")"         e.g. action("*")
+//!   clause    := "VIA" WORD ("," WORD)*           restrict to these edge kinds
+//!              | "WITHIN" NUMBER "HOPS"           cap path length
+//!
+//! Values are quoted strings; keywords, kinds and edge kinds are bare words.
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
@@ -24,6 +28,10 @@ pub enum Query {
         from_kind: String,
         from_id: String,
         to: Target,
+        /// If non-empty, only edges of these kinds may be traversed.
+        via: Vec<String>,
+        /// If set, cap path length to this many hops.
+        within: Option<usize>,
     },
     Escalate {
         from_kind: String,
@@ -41,10 +49,11 @@ enum Tok {
     Str(String),
     LParen,
     RParen,
+    Comma,
 }
 
 fn lex(src: &str) -> Result<Vec<Tok>> {
-    let is_word = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | ':' | '*' | '.' | '/');
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
     let mut toks = Vec::new();
     let mut chars = src.chars().peekable();
     while let Some(&c) = chars.peek() {
@@ -60,12 +69,23 @@ fn lex(src: &str) -> Result<Vec<Tok>> {
                 chars.next();
                 toks.push(Tok::RParen);
             }
+            ',' => {
+                chars.next();
+                toks.push(Tok::Comma);
+            }
             '"' | '\'' => {
                 let quote = c;
                 chars.next();
                 let mut s = String::new();
                 let mut closed = false;
-                for ch in chars.by_ref() {
+                while let Some(ch) = chars.next() {
+                    if ch == '\\' {
+                        // escape: take the next char literally
+                        if let Some(esc) = chars.next() {
+                            s.push(esc);
+                        }
+                        continue;
+                    }
                     if ch == quote {
                         closed = true;
                         break;
@@ -101,6 +121,10 @@ struct Parser {
 }
 
 impl Parser {
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
+
     fn next(&mut self) -> Option<Tok> {
         let t = self.toks.get(self.pos).cloned();
         if t.is_some() {
@@ -137,6 +161,10 @@ impl Parser {
         }
     }
 
+    fn keyword_ahead(&self, kw: &str) -> bool {
+        matches!(self.peek(), Some(Tok::Word(w)) if w.eq_ignore_ascii_case(kw))
+    }
+
     /// node_ref := WORD "(" STRING ")"
     fn node_ref(&mut self) -> Result<(String, String)> {
         let kind = self.word()?;
@@ -162,10 +190,34 @@ pub fn parse(src: &str) -> Result<Query> {
             } else {
                 Target::Node { kind: tk, id: ti }
             };
+            let mut via = Vec::new();
+            let mut within = None;
+            loop {
+                if p.keyword_ahead("VIA") {
+                    p.next();
+                    via.push(p.word()?);
+                    while matches!(p.peek(), Some(Tok::Comma)) {
+                        p.next();
+                        via.push(p.word()?);
+                    }
+                } else if p.keyword_ahead("WITHIN") {
+                    p.next();
+                    let n = p.word()?;
+                    let hops: usize = n
+                        .parse()
+                        .map_err(|_| anyhow!("WITHIN expects a number, found `{n}`"))?;
+                    p.expect_word("HOPS")?;
+                    within = Some(hops);
+                } else {
+                    break;
+                }
+            }
             Query::Paths {
                 from_kind,
                 from_id,
                 to,
+                via,
+                within,
             }
         }
         "ESCALATE" => {
@@ -201,6 +253,8 @@ mod tests {
                     kind: "resource".into(),
                     id: "prod".into()
                 },
+                via: vec![],
+                within: None,
             }
         );
     }
@@ -214,8 +268,25 @@ mod tests {
                 from_kind: "user".into(),
                 from_id: "alice".into(),
                 to: Target::Action("*".into()),
+                via: vec![],
+                within: None,
             }
         );
+    }
+
+    #[test]
+    fn parses_via_and_within() {
+        let q = parse(
+            r#"PATHS FROM user("a") TO resource("b") VIA can_assume, has_permission WITHIN 4 HOPS"#,
+        )
+        .unwrap();
+        match q {
+            Query::Paths { via, within, .. } => {
+                assert_eq!(via, vec!["can_assume".to_string(), "has_permission".to_string()]);
+                assert_eq!(within, Some(4));
+            }
+            _ => panic!("expected Paths"),
+        }
     }
 
     #[test]
@@ -231,10 +302,20 @@ mod tests {
     }
 
     #[test]
+    fn handles_escaped_quotes_in_strings() {
+        let q = parse(r#"PATHS FROM user("a\"b") TO resource("c")"#).unwrap();
+        match q {
+            Query::Paths { from_id, .. } => assert_eq!(from_id, "a\"b"),
+            _ => panic!("expected Paths"),
+        }
+    }
+
+    #[test]
     fn rejects_garbage() {
         assert!(parse(r#"PATHS FROM user("alice")"#).is_err()); // missing TO
         assert!(parse(r#"FOO FROM user("x") TO resource("y")"#).is_err());
         assert!(parse(r#"PATHS FROM user("alice") TO resource("y") extra"#).is_err());
         assert!(parse(r#"PATHS FROM user(alice) TO resource("y")"#).is_err()); // unquoted
+        assert!(parse(r#"PATHS FROM user("a") TO resource("b") WITHIN x HOPS"#).is_err());
     }
 }

@@ -40,10 +40,20 @@ The raw path command is still there: `cargo run -- paths --from alice --to all-r
 - `PATHS FROM <node> TO <node>` every attack path between two nodes.
 - `PATHS FROM <node> TO action("<pattern>")` paths to any capability matching the
   action (glob: `*`, `s3:*`, exact). Answers "who can reach full control".
-- `ESCALATE FROM <node>` roles reachable from a principal.
+- `ESCALATE FROM <node>` identities (user, group, role) reachable from a principal.
 - `BLAST <node>` everything a node can reach.
 
-A node is `kind("id")`, e.g. `user("alice")`, `role("deployer")`.
+Clauses on `PATHS`:
+
+- `VIA <kind>[, <kind>...]` restrict traversal to those edge kinds.
+- `WITHIN n HOPS` cap path length.
+
+```
+PATHS FROM user("alice") TO action("*") VIA can_assume, has_permission WITHIN 4 HOPS
+```
+
+A node is `kind("id")`, e.g. `user("alice")`, `role("deployer")`. `action("P")`
+paths always end on an edge that actually grants `P` (glob: `*`, `s3:*`, exact).
 
 ## Stack
 

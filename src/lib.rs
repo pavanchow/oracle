@@ -120,13 +120,21 @@ impl Graph {
 
     /// Attack paths from one node to another, under the default limits.
     pub fn paths(&self, from: &str, to: &str) -> Result<PathSet> {
-        self.paths_with(from, to, Limits::default())
+        self.paths_with(from, to, Limits::default(), &[])
     }
 
-    /// Attack paths from one node to another, under explicit limits.
-    pub fn paths_with(&self, from: &str, to: &str, limits: Limits) -> Result<PathSet> {
+    /// Attack paths from one node to another, under explicit limits, optionally
+    /// restricted to edges whose kind is in `via` (empty = any edge).
+    pub fn paths_with(
+        &self,
+        from: &str,
+        to: &str,
+        limits: Limits,
+        via: &[String],
+    ) -> Result<PathSet> {
         let start = self.node_id(from)?;
         let target = self.node_id(to)?;
+        let via: HashSet<String> = via.iter().cloned().collect();
         let mut out = Vec::new();
         let mut truncated = false;
         let mut visited = HashSet::new();
@@ -135,6 +143,7 @@ impl Graph {
             start,
             start,
             target,
+            &via,
             &mut visited,
             &mut steps,
             &mut out,
@@ -147,10 +156,11 @@ impl Graph {
         })
     }
 
-    /// Attack paths from a node to any node reachable via an edge whose granted
-    /// action satisfies the pattern (e.g. `action("*")` = who can reach full control).
+    /// Attack paths from a node to any capability whose granted action satisfies
+    /// the pattern. A returned path always ENDS on the matching edge, so it truly
+    /// grants the queried action (e.g. `action("*")` = who can reach full control).
     pub fn paths_to_action(&self, from: &str, pattern: &str) -> Result<PathSet> {
-        self.paths_to_action_with(from, pattern, Limits::default())
+        self.paths_to_action_with(from, pattern, Limits::default(), &[])
     }
 
     pub fn paths_to_action_with(
@@ -158,28 +168,75 @@ impl Graph {
         from: &str,
         pattern: &str,
         limits: Limits,
+        via: &[String],
     ) -> Result<PathSet> {
         let start = self.node_id(from)?;
+        let via: HashSet<String> = via.iter().cloned().collect();
+        // Prefix search is one hop shorter, since we append the matching edge.
+        let plimits = Limits {
+            max_depth: limits.max_depth.saturating_sub(1),
+            max_results: limits.max_results,
+        };
         let mut out = Vec::new();
         let mut truncated = false;
-        for target in self.action_targets(pattern) {
-            if target == start {
-                continue;
-            }
-            let mut visited = HashSet::new();
-            let mut steps = Vec::new();
-            self.walk(
-                start,
-                start,
-                target,
-                &mut visited,
-                &mut steps,
-                &mut out,
-                &limits,
-                &mut truncated,
-            );
+        for e in self.g.edge_indices() {
             if truncated {
                 break;
+            }
+            let action = match &self.g[e].action {
+                Some(a) => a,
+                None => continue,
+            };
+            if !action_matches(pattern, action) {
+                continue;
+            }
+            if !via.is_empty() && !via.contains(self.g[e].kind.as_str()) {
+                continue;
+            }
+            let (u, v) = match self.g.edge_endpoints(e) {
+                Some(pair) => pair,
+                None => continue,
+            };
+            if v == start {
+                continue;
+            }
+            if u == start {
+                out.push(AttackPath {
+                    start,
+                    steps: vec![Step { edge: e, to: v }],
+                });
+                if out.len() >= limits.max_results {
+                    truncated = true;
+                }
+                continue;
+            }
+            // Every simple path start -> u, then the matching edge u -> v appended.
+            let mut prefixes = Vec::new();
+            let mut visited = HashSet::new();
+            let mut steps = Vec::new();
+            let mut ptrunc = false;
+            self.walk(
+                start, start, u, &via, &mut visited, &mut steps, &mut prefixes, &plimits,
+                &mut ptrunc,
+            );
+            if ptrunc {
+                truncated = true;
+            }
+            for p in prefixes {
+                // Keep the whole path simple: v must be new.
+                if v == start || p.steps.iter().any(|s| s.to == v) {
+                    continue;
+                }
+                let mut steps2 = p.steps.clone();
+                steps2.push(Step { edge: e, to: v });
+                out.push(AttackPath {
+                    start,
+                    steps: steps2,
+                });
+                if out.len() >= limits.max_results {
+                    truncated = true;
+                    break;
+                }
             }
         }
         Ok(PathSet {
@@ -232,6 +289,7 @@ impl Graph {
         start: NodeIndex,
         cur: NodeIndex,
         target: NodeIndex,
+        via: &HashSet<String>,
         visited: &mut HashSet<NodeIndex>,
         steps: &mut Vec<Step>,
         out: &mut Vec<AttackPath>,
@@ -246,6 +304,10 @@ impl Graph {
             return;
         }
         for e in self.g.edges_directed(cur, Outgoing) {
+            // Restrict to allowed edge kinds when a VIA filter is set.
+            if !via.is_empty() && !via.contains(e.weight().kind.as_str()) {
+                continue;
+            }
             let next = e.target();
             // Simple paths only: never revisit the start or an in-path node.
             if next == start || visited.contains(&next) {
@@ -267,25 +329,11 @@ impl Graph {
                 }
             } else {
                 visited.insert(next);
-                self.walk(start, next, target, visited, steps, out, limits, truncated);
+                self.walk(start, next, target, via, visited, steps, out, limits, truncated);
                 visited.remove(&next);
             }
             steps.pop();
         }
-    }
-
-    fn action_targets(&self, pattern: &str) -> Vec<NodeIndex> {
-        let mut set = std::collections::BTreeSet::new();
-        for e in self.g.edge_indices() {
-            if let Some(action) = &self.g[e].action {
-                if action_matches(pattern, action) {
-                    if let Some((_, to)) = self.g.edge_endpoints(e) {
-                        set.insert(to);
-                    }
-                }
-            }
-        }
-        set.into_iter().collect()
     }
 }
 
@@ -382,11 +430,11 @@ mod tests {
                      {"from":"c","to":"d","kind":"x"}]}"#;
         let g = Graph::from_json(j).unwrap();
         let shallow = g
-            .paths_with("a", "d", Limits { max_depth: 2, max_results: 1000 })
+            .paths_with("a", "d", Limits { max_depth: 2, max_results: 1000 }, &[])
             .unwrap();
         assert!(shallow.paths.is_empty());
         let deep = g
-            .paths_with("a", "d", Limits { max_depth: 8, max_results: 1000 })
+            .paths_with("a", "d", Limits { max_depth: 8, max_results: 1000 }, &[])
             .unwrap();
         assert_eq!(deep.paths.len(), 1);
         assert_eq!(deep.paths[0].hops(), 3);
@@ -399,10 +447,61 @@ mod tests {
             "edges":[{"from":"a","to":"b","kind":"x"},{"from":"a","to":"b","kind":"y"}]}"#;
         let g = Graph::from_json(j).unwrap();
         let r = g
-            .paths_with("a", "b", Limits { max_depth: 8, max_results: 1 })
+            .paths_with("a", "b", Limits { max_depth: 8, max_results: 1 }, &[])
             .unwrap();
         assert_eq!(r.paths.len(), 1);
         assert!(r.truncated);
+    }
+
+    #[test]
+    fn via_restricts_edge_kinds() {
+        // a -can_assume-> b -network-> c ; VIA can_assume must not reach c.
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"role"},{"id":"c","kind":"resource"}],
+            "edges":[{"from":"a","to":"b","kind":"can_assume"},
+                     {"from":"b","to":"c","kind":"network"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let all = g
+            .paths_with("a", "c", Limits::default(), &[])
+            .unwrap();
+        assert_eq!(all.paths.len(), 1);
+        let restricted = g
+            .paths_with("a", "c", Limits::default(), &["can_assume".into()])
+            .unwrap();
+        assert!(restricted.paths.is_empty());
+    }
+
+    #[test]
+    fn action_query_final_edge_must_match() {
+        // alice reaches b only via a non-matching edge; c reaches b via s3:PutObject.
+        // action("s3:*") from alice must return NOTHING (the earlier bug returned a
+        // path to b labeled by the wrong edge).
+        let j = r#"{
+            "nodes":[{"id":"alice","kind":"user"},{"id":"c","kind":"role"},{"id":"b","kind":"resource"}],
+            "edges":[{"from":"alice","to":"b","kind":"has_permission","action":"logs:Get"},
+                     {"from":"c","to":"b","kind":"has_permission","action":"s3:PutObject"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        assert!(g.paths_to_action("alice", "s3:*").unwrap().paths.is_empty());
+        // From c it is real, and the final edge is the matching one.
+        let r = g.paths_to_action("c", "s3:*").unwrap();
+        assert_eq!(r.paths.len(), 1);
+        assert!(g.render_path(&r.paths[0]).contains("s3:PutObject"));
+    }
+
+    #[test]
+    fn action_query_picks_the_matching_parallel_edge() {
+        // Two parallel edges alice->b; only one grants s3. Must return exactly the
+        // matching one, not both, and not the logs edge.
+        let j = r#"{
+            "nodes":[{"id":"alice","kind":"user"},{"id":"b","kind":"resource"}],
+            "edges":[{"from":"alice","to":"b","kind":"has_permission","action":"s3:PutObject"},
+                     {"from":"alice","to":"b","kind":"has_permission","action":"logs:Get"}]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let r = g.paths_to_action("alice", "s3:*").unwrap();
+        assert_eq!(r.paths.len(), 1);
+        let rendered = g.render_path(&r.paths[0]);
+        assert!(rendered.contains("s3:PutObject"));
+        assert!(!rendered.contains("logs:Get"));
     }
 
     #[test]
