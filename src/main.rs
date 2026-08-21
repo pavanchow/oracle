@@ -112,18 +112,17 @@ fn main() -> Result<()> {
                     print_paths(&g, &r, techniques);
                 }
                 Query::Escalate { from_id, .. } => {
-                    // Escalation can land on any identity, not just roles: AWS
-                    // privilege escalation loops back to users and groups too.
-                    let principals: Vec<_> = g
-                        .reachable_from(&from_id)?
-                        .into_iter()
-                        .filter(|&n| matches!(g.node_kind_of(n), "user" | "group" | "role"))
-                        .collect();
-                    if principals.is_empty() {
-                        println!("no identities reachable from {from_id}");
+                    // Real escalation crosses a privilege boundary (a can_assume
+                    // hop), not just reaching your own group.
+                    let targets = g.escalation_from(&from_id)?;
+                    if targets.is_empty() {
+                        println!("no privilege escalation from {from_id}");
                     } else {
-                        println!("{} identit(ies) reachable from {from_id}:", principals.len());
-                        for n in principals {
+                        println!(
+                            "{} escalation target(s) from {from_id}:",
+                            targets.len()
+                        );
+                        for n in targets {
                             println!("  {}", g.node_label(n));
                         }
                     }

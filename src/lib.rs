@@ -3,7 +3,7 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::{Bfs, EdgeRef};
 use petgraph::Direction::Outgoing;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub mod import_aws;
 pub mod query;
@@ -75,6 +75,10 @@ impl AttackPath {
 pub struct Limits {
     pub max_depth: usize,
     pub max_results: usize,
+    /// Hard cap on edges examined during a search. Simple-path enumeration is
+    /// exponential in the worst case, so this bounds compute regardless of how
+    /// dense the graph is. Hitting it sets `truncated`.
+    pub max_visits: usize,
 }
 
 impl Default for Limits {
@@ -82,6 +86,7 @@ impl Default for Limits {
         Limits {
             max_depth: 8,
             max_results: 1000,
+            max_visits: 200_000,
         }
     }
 }
@@ -162,6 +167,7 @@ impl Graph {
         let mut truncated = false;
         let mut visited = HashSet::new();
         let mut steps = Vec::new();
+        let mut visits = 0usize;
         self.walk(
             start,
             start,
@@ -171,6 +177,7 @@ impl Graph {
             &mut steps,
             &mut out,
             &limits,
+            &mut visits,
             &mut truncated,
         );
         Ok(PathSet {
@@ -202,9 +209,11 @@ impl Graph {
         let plimits = Limits {
             max_depth: limits.max_depth.saturating_sub(1),
             max_results: limits.max_results,
+            max_visits: limits.max_visits,
         };
         let mut out = Vec::new();
         let mut truncated = false;
+        let mut visits = 0usize;
         for e in self.g.edge_indices() {
             if truncated {
                 break;
@@ -246,7 +255,7 @@ impl Graph {
             let mut ptrunc = false;
             self.walk(
                 start, start, u, &via, &mut visited, &mut steps, &mut prefixes, &plimits,
-                &mut ptrunc,
+                &mut visits, &mut ptrunc,
             );
             if ptrunc {
                 truncated = true;
@@ -272,6 +281,37 @@ impl Graph {
             paths: out,
             truncated,
         })
+    }
+
+    /// Identities reachable via a path that crosses a privilege boundary, i.e.
+    /// that traverses at least one `can_assume` edge. Plain reachability to your
+    /// own group is not escalation, so this is not just a filtered `BLAST`.
+    pub fn escalation_from(&self, from: &str) -> Result<Vec<NodeIndex>> {
+        let start = self.node_id(from)?;
+        // BFS over (node, crossed_a_boundary) states.
+        let mut seen: HashSet<(NodeIndex, bool)> = HashSet::new();
+        let mut emitted: HashSet<NodeIndex> = HashSet::new();
+        let mut q = VecDeque::new();
+        let mut out = Vec::new();
+        seen.insert((start, false));
+        q.push_back((start, false));
+        while let Some((cur, crossed)) = q.pop_front() {
+            for e in self.g.edges_directed(cur, Outgoing) {
+                let next = e.target();
+                let ncross = crossed || e.weight().kind == "can_assume";
+                if seen.insert((next, ncross)) {
+                    if ncross
+                        && next != start
+                        && matches!(self.node_kind_of(next), "user" | "group" | "role")
+                        && emitted.insert(next)
+                    {
+                        out.push(next);
+                    }
+                    q.push_back((next, ncross));
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Every node reachable from a start node (bounded, one visit per node).
@@ -387,12 +427,11 @@ impl Graph {
             }
             Query::Escalate { from_id, .. } => {
                 let nodes: Vec<String> = self
-                    .reachable_from(&from_id)?
+                    .escalation_from(&from_id)?
                     .into_iter()
-                    .filter(|&n| matches!(self.node_kind_of(n), "user" | "group" | "role"))
                     .map(|n| self.node_label(n))
                     .collect();
-                serde_json::json!({ "kind": "identities", "count": nodes.len(), "nodes": nodes })
+                serde_json::json!({ "kind": "escalation", "count": nodes.len(), "nodes": nodes })
             }
             Query::Blast { from_id, .. } => {
                 let nodes: Vec<String> = self
@@ -442,6 +481,7 @@ impl Graph {
         steps: &mut Vec<Step>,
         out: &mut Vec<AttackPath>,
         limits: &Limits,
+        visits: &mut usize,
         truncated: &mut bool,
     ) {
         if out.len() >= limits.max_results {
@@ -452,6 +492,12 @@ impl Graph {
             return;
         }
         for e in self.g.edges_directed(cur, Outgoing) {
+            // Bound total work so a dense graph cannot pin the CPU.
+            *visits += 1;
+            if *visits > limits.max_visits {
+                *truncated = true;
+                return;
+            }
             // Restrict to allowed edge kinds when a VIA filter is set.
             if !via.is_empty() && !via.contains(e.weight().kind.as_str()) {
                 continue;
@@ -477,7 +523,9 @@ impl Graph {
                 }
             } else {
                 visited.insert(next);
-                self.walk(start, next, target, via, visited, steps, out, limits, truncated);
+                self.walk(
+                    start, next, target, via, visited, steps, out, limits, visits, truncated,
+                );
                 visited.remove(&next);
             }
             steps.pop();
@@ -617,11 +665,11 @@ mod tests {
                      {"from":"c","to":"d","kind":"x"}]}"#;
         let g = Graph::from_json(j).unwrap();
         let shallow = g
-            .paths_with("a", "d", Limits { max_depth: 2, max_results: 1000 }, &[])
+            .paths_with("a", "d", Limits { max_depth: 2, ..Limits::default() }, &[])
             .unwrap();
         assert!(shallow.paths.is_empty());
         let deep = g
-            .paths_with("a", "d", Limits { max_depth: 8, max_results: 1000 }, &[])
+            .paths_with("a", "d", Limits { max_depth: 8, ..Limits::default() }, &[])
             .unwrap();
         assert_eq!(deep.paths.len(), 1);
         assert_eq!(deep.paths[0].hops(), 3);
@@ -634,9 +682,30 @@ mod tests {
             "edges":[{"from":"a","to":"b","kind":"x"},{"from":"a","to":"b","kind":"y"}]}"#;
         let g = Graph::from_json(j).unwrap();
         let r = g
-            .paths_with("a", "b", Limits { max_depth: 8, max_results: 1 }, &[])
+            .paths_with("a", "b", Limits { max_depth: 8, max_results: 1, ..Limits::default() }, &[])
             .unwrap();
         assert_eq!(r.paths.len(), 1);
+        assert!(r.truncated);
+    }
+
+    #[test]
+    fn visit_budget_bounds_work() {
+        // A dense graph; a tiny visit budget must stop early and flag truncation.
+        let mut nodes = String::new();
+        let mut edges = String::new();
+        for i in 0..12 {
+            nodes.push_str(&format!("{{\"id\":\"n{i}\",\"kind\":\"role\"}},"));
+            for j in 0..12 {
+                if i != j {
+                    edges.push_str(&format!("{{\"from\":\"n{i}\",\"to\":\"n{j}\",\"kind\":\"x\"}},"));
+                }
+            }
+        }
+        let json = format!("{{\"nodes\":[{}],\"edges\":[{}]}}", nodes.trim_end_matches(','), edges.trim_end_matches(','));
+        let g = Graph::from_json(&json).unwrap();
+        let r = g
+            .paths_with("n0", "n11", Limits { max_visits: 100, ..Limits::default() }, &[])
+            .unwrap();
         assert!(r.truncated);
     }
 
@@ -700,6 +769,23 @@ mod tests {
                      {"from":"b","to":"a","kind":"x"}]}"#;
         let g = Graph::from_json(j).unwrap();
         assert!(g.paths("a", "a").unwrap().paths.is_empty());
+    }
+
+    #[test]
+    fn escalation_requires_boundary_crossing() {
+        let g = Graph::load("data/worked-examples.json").unwrap();
+        // ci-runner assumes deployer (a can_assume boundary), reaching deployer
+        // and admin. Both are real escalations.
+        let esc: Vec<String> = g
+            .escalation_from("ci-runner")
+            .unwrap()
+            .into_iter()
+            .map(|n| g.node_label(n))
+            .collect();
+        assert!(esc.iter().any(|s| s == "role:deployer"));
+        assert!(esc.iter().any(|s| s == "role:admin"));
+        // contractor only has member_of into its own group. That is not escalation.
+        assert!(g.escalation_from("contractor").unwrap().is_empty());
     }
 
     #[test]
