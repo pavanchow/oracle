@@ -61,6 +61,7 @@ fn main() -> Result<()> {
                     to,
                     via,
                     within,
+                    on_resource,
                     ..
                 } => {
                     let mut limits = Limits::default();
@@ -69,9 +70,13 @@ fn main() -> Result<()> {
                     }
                     let r = match to {
                         Target::Node { id, .. } => g.paths_with(&from_id, &id, limits, &via)?,
-                        Target::Action(pat) => {
-                            g.paths_to_action_with(&from_id, &pat, limits, &via)?
-                        }
+                        Target::Action(pat) => g.paths_to_action_with(
+                            &from_id,
+                            &pat,
+                            limits,
+                            &via,
+                            on_resource.as_deref(),
+                        )?,
                     };
                     print_paths(&g, &r);
                 }

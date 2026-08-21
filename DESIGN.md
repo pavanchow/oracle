@@ -90,20 +90,35 @@ BLAST role("deployer")
 4. axum API, then the graph visualization UI.
 5. MCP server for agent access.
 
-## Model decisions for the AWS IAM importer (locked)
+## IAM model (implemented, ready for the importer)
 
-These were surfaced before building the importer so the model is right from the start:
+The model was extended before writing the importer so it is right from the start.
+`data/iam-sample.json` exercises all of it.
 
-- **Policies are first-class nodes** (`kind: "policy"`), not flattened. Paths read
-  `user -> policy -> resource`, which keeps remediation context (revoke *this* policy).
-- **Resource ARN globbing.** Grants apply to resource ARNs with wildcards, so the
-  importer needs a `resource_matches` mirroring `action_matches`.
-- **Condition keys.** IAM `Condition` blocks (MFA, source IP, etc.) will be carried on
-  edges (an optional `conditions` field). A path gated by an unmet condition is flagged
-  conditional rather than reported as a clean win, to avoid false positives.
-- **AND-logic (hyperedges).** Some escalations need multiple grants at once
-  (`lambda:UpdateFunctionCode` AND `iam:PassRole`). A plain directed edge is OR-logic,
-  so the importer will model multi-grant actions as a requirement group, not a single edge.
+- **Resource ARN globbing (done).** `Edge.resource: Option<String>` carries the ARN
+  a grant applies to. `wildcard_match` handles `*` and `?` as IAM does. OQL gained
+  `ON resource("arn")` to scope an `action(...)` query. `None` means unscoped (any
+  resource).
+- **Condition keys (done).** `Edge.conditions` captures the IAM `Condition` block
+  verbatim. The engine does not evaluate them yet, but any hop gated by a condition is
+  rendered `(conditional: <keys>)`, so an MFA- or IP-gated path is never reported as a
+  clean win. That avoids false positives.
+- **AND-logic via bundle nodes (Option B, done).** Some escalations need multiple
+  grants at once (`lambda:UpdateFunctionCode` AND `iam:PassRole`). A plain directed
+  edge is OR-logic, so AND is resolved at import time: the importer creates a
+  `kind: "bundle"` node (with `attrs.requires` listing the actions) and only links a
+  principal into it when the principal holds all required grants. Traversing the bundle
+  then implies acquiring the whole technique. The graph engine stays simple.
+- **Policies as first-class nodes.** Policies stay `kind: "policy"` rather than being
+  flattened, so paths read `user -> policy -> resource` and keep remediation context
+  (revoke *this* policy).
+
+## What the importer does next
+
+Consume `aws iam get-account-authorization-details` (works offline on a saved export),
+and emit this graph JSON: principals as nodes, attached and inline policies expanded
+into `has_permission` edges with `action`/`resource`/`conditions`, `sts:AssumeRole`
+trust into `can_assume` edges, and known escalation techniques into bundle nodes.
 
 ## Safety and correctness notes
 

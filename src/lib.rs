@@ -20,8 +20,17 @@ pub struct Edge {
     pub from: String,
     pub to: String,
     pub kind: String,
+    /// The IAM action granted, if any (e.g. `s3:GetObject`). Supports `*` globs.
     #[serde(default)]
     pub action: Option<String>,
+    /// The resource ARN the grant applies to, if any. Supports `*`/`?` globs.
+    /// `None` means the grant is not resource-scoped (applies to any resource).
+    #[serde(default)]
+    pub resource: Option<String>,
+    /// IAM `Condition` block, captured verbatim so a path gated on MFA, source IP,
+    /// etc. can be flagged conditional. The engine does not evaluate these yet.
+    #[serde(default)]
+    pub conditions: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,15 +169,18 @@ impl Graph {
     /// the pattern. A returned path always ENDS on the matching edge, so it truly
     /// grants the queried action (e.g. `action("*")` = who can reach full control).
     pub fn paths_to_action(&self, from: &str, pattern: &str) -> Result<PathSet> {
-        self.paths_to_action_with(from, pattern, Limits::default(), &[])
+        self.paths_to_action_with(from, pattern, Limits::default(), &[], None)
     }
 
+    /// As above, additionally restricting the matching edge to grants whose
+    /// resource ARN matches `on_resource` (glob). `None` means any resource.
     pub fn paths_to_action_with(
         &self,
         from: &str,
         pattern: &str,
         limits: Limits,
         via: &[String],
+        on_resource: Option<&str>,
     ) -> Result<PathSet> {
         let start = self.node_id(from)?;
         let via: HashSet<String> = via.iter().cloned().collect();
@@ -188,6 +200,9 @@ impl Graph {
                 None => continue,
             };
             if !action_matches(pattern, action) {
+                continue;
+            }
+            if !resource_ok(&self.g[e].resource, on_resource) {
                 continue;
             }
             if !via.is_empty() && !via.contains(self.g[e].kind.as_str()) {
@@ -267,15 +282,25 @@ impl Graph {
         &self.g[idx].kind
     }
 
-    /// Render one attack path, showing the exact edge that enabled each hop.
+    /// Render one attack path, showing the exact edge that enabled each hop and
+    /// flagging any hop that is gated by an IAM condition.
     pub fn render_path(&self, p: &AttackPath) -> String {
         let mut out = self.node_label(p.start);
         for s in &p.steps {
             let ed = &self.g[s.edge];
-            let label = match &ed.action {
+            let mut label = match &ed.action {
                 Some(a) => format!("{} {}", ed.kind, a),
                 None => ed.kind.clone(),
             };
+            if let Some(res) = &ed.resource {
+                label.push_str(&format!(" on {res}"));
+            }
+            if let Some(cond) = &ed.conditions {
+                if !cond.is_empty() {
+                    let keys: Vec<&str> = cond.keys().map(String::as_str).collect();
+                    label.push_str(&format!(" (conditional: {})", keys.join(", ")));
+                }
+            }
             out.push_str(&format!(" --[{}]--> {}", label, self.node_label(s.to)));
         }
         out
@@ -357,6 +382,45 @@ fn action_matches(query: &str, grant: &str) -> bool {
         return query.starts_with(gpfx);
     }
     false
+}
+
+/// Does an edge's resource grant satisfy a queried resource ARN? A grant of
+/// `None` is unscoped and covers any resource. Both sides may glob.
+fn resource_ok(edge_resource: &Option<String>, query: Option<&str>) -> bool {
+    match (edge_resource, query) {
+        (_, None) => true,
+        (None, Some(_)) => true,
+        (Some(grant), Some(q)) => wildcard_match(grant, q) || wildcard_match(q, grant),
+    }
+}
+
+/// Glob match supporting `*` (any run, including empty) and `?` (one char),
+/// the wildcards IAM resource ARNs use.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut i, mut j) = (0usize, 0usize);
+    let (mut star, mut mark) = (None, 0usize);
+    while j < t.len() {
+        if i < p.len() && (p[i] == '?' || p[i] == t[j]) {
+            i += 1;
+            j += 1;
+        } else if i < p.len() && p[i] == '*' {
+            star = Some(i);
+            mark = j;
+            i += 1;
+        } else if let Some(s) = star {
+            i = s + 1;
+            mark += 1;
+            j = mark;
+        } else {
+            return false;
+        }
+    }
+    while i < p.len() && p[i] == '*' {
+        i += 1;
+    }
+    i == p.len()
 }
 
 #[cfg(test)]
@@ -522,5 +586,79 @@ mod tests {
         assert!(action_matches("s3:*", "s3:GetObject"));
         assert!(action_matches("*", "iam:PassRole"));
         assert!(!action_matches("s3:GetObject", "ec2:*"));
+    }
+
+    #[test]
+    fn wildcard_matches_arns() {
+        assert!(wildcard_match("arn:aws:s3:::prod/*", "arn:aws:s3:::prod/data.csv"));
+        assert!(wildcard_match("arn:aws:*", "arn:aws:iam::1:role/admin"));
+        assert!(wildcard_match("arn:aws:s3:::p?od", "arn:aws:s3:::prod"));
+        assert!(!wildcard_match("arn:aws:s3:::prod/*", "arn:aws:s3:::other/x"));
+        assert!(wildcard_match("exact", "exact"));
+        assert!(!wildcard_match("exact", "exacter"));
+    }
+
+    #[test]
+    fn resource_ok_semantics() {
+        assert!(resource_ok(&None, Some("anything"))); // unscoped grant covers all
+        assert!(resource_ok(&Some("arn:aws:s3:::b/*".into()), None)); // no query = match
+        assert!(resource_ok(
+            &Some("arn:aws:s3:::b/*".into()),
+            Some("arn:aws:s3:::b/key")
+        ));
+        assert!(!resource_ok(
+            &Some("arn:aws:s3:::b/*".into()),
+            Some("arn:aws:s3:::c/key")
+        ));
+    }
+
+    #[test]
+    fn action_query_filters_by_resource() {
+        let j = r#"{
+            "nodes":[{"id":"a","kind":"user"},{"id":"b","kind":"resource"},{"id":"c","kind":"resource"}],
+            "edges":[
+                {"from":"a","to":"b","kind":"has_permission","action":"s3:GetObject","resource":"arn:aws:s3:::mine/*"},
+                {"from":"a","to":"c","kind":"has_permission","action":"s3:GetObject","resource":"arn:aws:s3:::yours/*"}
+            ]}"#;
+        let g = Graph::from_json(j).unwrap();
+        let any = g.paths_to_action("a", "s3:*").unwrap();
+        assert_eq!(any.paths.len(), 2);
+        let scoped = g
+            .paths_to_action_with(
+                "a",
+                "s3:*",
+                Limits::default(),
+                &[],
+                Some("arn:aws:s3:::mine/secret"),
+            )
+            .unwrap();
+        assert_eq!(scoped.paths.len(), 1);
+        assert!(g.render_path(&scoped.paths[0]).contains("mine"));
+    }
+
+    #[test]
+    fn conditional_edge_is_flagged_and_arns_render() {
+        let g = Graph::load("data/iam-sample.json").unwrap();
+        let r = g.paths_to_action("alice", "s3:PutObject").unwrap();
+        // The direct s3:PutObject grant is one path; a `*` admin grant is another.
+        // The direct one must be flagged conditional and carry the ARN.
+        let direct = r
+            .paths
+            .iter()
+            .map(|p| g.render_path(p))
+            .find(|s| s.contains("s3:PutObject"))
+            .expect("expected a direct s3:PutObject path");
+        assert!(direct.contains("conditional: aws:MultiFactorAuthPresent"));
+        assert!(direct.contains("arn:aws:s3:::prod-artifacts/*"));
+    }
+
+    #[test]
+    fn and_bundle_reaches_full_control() {
+        let g = Graph::load("data/iam-sample.json").unwrap();
+        let r = g.paths_to_action("alice", "*").unwrap();
+        assert!(r
+            .paths
+            .iter()
+            .any(|p| g.render_path(p).contains("lambda-passrole-escalation")));
     }
 }

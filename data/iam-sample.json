@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    { "id": "alice", "kind": "user" },
+    { "id": "developers", "kind": "group" },
+    { "id": "build-runner", "kind": "role" },
+    { "id": "deployer", "kind": "role" },
+    { "id": "lambda-exec", "kind": "role", "attrs": { "note": "privileged execution role" } },
+    { "id": "prod-artifacts", "kind": "resource", "attrs": { "arn": "arn:aws:s3:::prod-artifacts" } },
+    { "id": "everything", "kind": "resource", "attrs": { "arn": "arn:aws:*" } },
+    {
+      "id": "lambda-passrole-escalation",
+      "kind": "bundle",
+      "attrs": {
+        "technique": "lambda:UpdateFunctionCode + iam:PassRole",
+        "requires": ["lambda:UpdateFunctionCode", "iam:PassRole"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "alice", "to": "developers", "kind": "member_of" },
+    { "from": "developers", "to": "build-runner", "kind": "can_assume", "action": "sts:AssumeRole" },
+    { "from": "build-runner", "to": "deployer", "kind": "can_assume", "action": "sts:AssumeRole" },
+
+    { "from": "deployer", "to": "prod-artifacts", "kind": "has_permission",
+      "action": "s3:GetObject", "resource": "arn:aws:s3:::prod-artifacts/*" },
+
+    { "from": "deployer", "to": "prod-artifacts", "kind": "has_permission",
+      "action": "s3:PutObject", "resource": "arn:aws:s3:::prod-artifacts/*",
+      "conditions": { "aws:MultiFactorAuthPresent": "true" } },
+
+    { "from": "deployer", "to": "lambda-passrole-escalation", "kind": "grants_bundle",
+      "action": "lambda:UpdateFunctionCode" },
+    { "from": "lambda-passrole-escalation", "to": "lambda-exec", "kind": "escalates_to",
+      "action": "iam:PassRole" },
+
+    { "from": "lambda-exec", "to": "everything", "kind": "has_permission",
+      "action": "*", "resource": "arn:aws:*" }
+  ]
+}

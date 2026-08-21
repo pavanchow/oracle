@@ -2,11 +2,579 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>oracle</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oracle — Attack paths as the query result</title>
+<meta name="description" content="Oracle is a query language whose result is an attack path across an identity and network graph, not a set of rows.">
+<style>
+  :root{
+    --bg:#08090b;
+    --panel:#111316;
+    --panel-2:#0e1013;
+    --border:#1f2226;
+    --border-soft:#191b1f;
+    --text:#f2f3f5;
+    --text-dim:#9a9ea5;
+    --text-faint:#5c6066;
+    --accent:#5fd0c4;
+    --mono: "SF Mono", "Cascadia Code", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  a{ color:var(--accent); text-decoration:none; }
+  a:hover{ opacity:0.8; }
+  code{ font-family:var(--mono); }
+
+  .col{
+    max-width:1080px;
+    margin:0 auto;
+    padding:0 28px;
+  }
+
+  /* ---------- nav ---------- */
+  header.top{
+    position:sticky;
+    top:0;
+    z-index:20;
+    background:rgba(8,9,11,0.82);
+    backdrop-filter:saturate(160%) blur(14px);
+    border-bottom:1px solid var(--border-soft);
+  }
+  .top-inner{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 28px;
+    max-width:1080px;
+    margin:0 auto;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    font-weight:600;
+    font-size:15px;
+    color:var(--text);
+    letter-spacing:-0.01em;
+  }
+  .brand .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent);
+  }
+  .top-nav{ display:flex; gap:30px; }
+  .top-nav a{
+    color:var(--text-dim);
+    font-size:13.5px;
+  }
+  .top-nav a:hover{ color:var(--text); opacity:1; }
+
+  /* ---------- hero ---------- */
+  .hero{
+    padding:160px 0 140px;
+    text-align:center;
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:28px;
+  }
+  h1.hero-title{
+    font-size:clamp(2.75rem, 7vw, 5.2rem);
+    line-height:1.04;
+    margin:0 0 26px;
+    letter-spacing:-0.03em;
+    font-weight:650;
+  }
+  h1.hero-title .accent{ color:var(--accent); }
+  p.tagline{
+    font-size:clamp(1.15rem, 2.6vw, 1.5rem);
+    color:var(--text);
+    max-width:640px;
+    margin:0 auto 18px;
+    font-weight:400;
+    letter-spacing:-0.01em;
+  }
+  p.subline{
+    font-size:1.02rem;
+    color:var(--text-dim);
+    max-width:560px;
+    margin:0 auto 46px;
+    font-weight:400;
+  }
+  .hero-actions{
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:14px;
+  }
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:12px 22px;
+    border-radius:100px;
+    font-size:14px;
+    font-weight:500;
+    border:1px solid transparent;
+    transition:transform 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+  }
+  .btn:hover{ opacity:1; transform:translateY(-1px); }
+  .btn-primary{
+    background:var(--text);
+    color:#08090b;
+  }
+  .btn-primary:hover{ background:#d8dade; }
+  .btn-ghost{
+    background:transparent;
+    color:var(--text-dim);
+    border-color:var(--border);
+  }
+  .btn-ghost:hover{ border-color:var(--text-dim); color:var(--text); }
+
+  /* ---------- sections ---------- */
+  section{
+    padding:130px 0;
+    border-top:1px solid var(--border-soft);
+  }
+  .section-head{
+    max-width:640px;
+    margin:0 auto 56px;
+    text-align:center;
+  }
+  .kicker{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin-bottom:16px;
+  }
+  h2{
+    font-size:clamp(1.9rem, 4vw, 2.6rem);
+    margin:0 0 18px;
+    letter-spacing:-0.02em;
+    font-weight:600;
+    line-height:1.15;
+  }
+  .lede{
+    color:var(--text-dim);
+    font-size:1.05rem;
+    line-height:1.65;
+    margin:0;
+  }
+
+  /* ---------- idea cards ---------- */
+  .idea-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:1px;
+    background:var(--border-soft);
+    border:1px solid var(--border-soft);
+    border-radius:18px;
+    overflow:hidden;
+    margin-top:8px;
+  }
+  .idea-card{
+    background:var(--panel);
+    padding:40px 38px;
+  }
+  .idea-card h3{
+    margin:0 0 14px;
+    font-size:0.78rem;
+    color:var(--text-faint);
+    font-family:var(--mono);
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    font-weight:500;
+  }
+  .idea-card p{
+    margin:0;
+    color:var(--text-dim);
+    font-size:1rem;
+    line-height:1.7;
+  }
+  .idea-card code{ color:var(--text); }
+  .idea-card.yes h3{ color:var(--accent); }
+
+  /* ---------- graph viz ---------- */
+  .graph-panel{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:36px 8px 30px;
+    margin-top:8px;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,0.6);
+    overflow-x:auto;
+  }
+  .graph-panel svg{
+    display:block;
+    min-width:760px;
+    width:100%;
+    height:auto;
+    margin:0 auto;
+  }
+  .graph-caption{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--text-faint);
+    text-align:center;
+    margin-top:20px;
+    padding:0 20px;
+  }
+
+  /* ---------- OQL examples ---------- */
+  .oql-list{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-top:8px;
+  }
+  .oql-block{
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:18px 24px;
+    overflow-x:auto;
+  }
+  .oql-block code{
+    font-size:0.92rem;
+    color:#d3dbe0;
+    white-space:pre;
+  }
+  .oql-block .kw{ color:var(--accent); font-weight:600; }
+  .oql-block .fn{ color:#e0c397; }
+  .oql-block .str{ color:#b9caa0; }
+  .oql-block .num{ color:#8fb4d6; }
+
+  /* ---------- comparison ---------- */
+  .compare-list{
+    display:flex;
+    flex-direction:column;
+    margin-top:8px;
+  }
+  .compare-row{
+    display:grid;
+    grid-template-columns:200px 1fr;
+    gap:28px;
+    padding:26px 0;
+    border-top:1px solid var(--border-soft);
+  }
+  .compare-row:first-child{ border-top:none; }
+  .compare-row .tool{
+    font-weight:600;
+    color:var(--text);
+    font-size:0.98rem;
+  }
+  .compare-row .desc{
+    color:var(--text-dim);
+    font-size:0.98rem;
+    line-height:1.65;
+  }
+  .compare-row.oracle-row{
+    background:linear-gradient(90deg, rgba(95,208,196,0.05), transparent);
+    border-radius:12px;
+    padding:26px 20px;
+    margin:6px -20px 0;
+  }
+  .compare-row.oracle-row .tool{ color:var(--accent); }
+  .compare-row.oracle-row .desc{ color:var(--text); }
+
+  /* ---------- stack + status ---------- */
+  .stack-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:1px;
+    background:var(--border-soft);
+    border:1px solid var(--border-soft);
+    border-radius:18px;
+    overflow:hidden;
+    margin-top:8px;
+  }
+  .stat-card{
+    background:var(--panel);
+    padding:32px 28px;
+  }
+  .stat-card .label{
+    font-family:var(--mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--text-faint);
+    margin-bottom:12px;
+  }
+  .stat-card .val{
+    font-size:0.98rem;
+    color:var(--text-dim);
+    line-height:1.6;
+  }
+  .stat-card .val code{ color:var(--text); }
+
+  .status-block{
+    margin-top:48px;
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+    max-width:760px;
+  }
+  .status-line{
+    display:flex;
+    align-items:flex-start;
+    gap:14px;
+    color:var(--text-dim);
+    font-size:0.98rem;
+    line-height:1.65;
+  }
+  .status-dot{
+    width:8px;height:8px;border-radius:50%;
+    margin-top:8px;
+    flex-shrink:0;
+  }
+  .status-dot.done{ background:var(--accent); }
+  .status-dot.next{ background:var(--text-faint); }
+  .status-line b{ color:var(--text); font-weight:600; }
+
+  /* ---------- footer ---------- */
+  footer{
+    padding:64px 0 80px;
+    text-align:center;
+    color:var(--text-faint);
+    font-size:0.85rem;
+    border-top:1px solid var(--border-soft);
+  }
+  footer a{ color:var(--text-dim); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 760px){
+    .idea-grid{ grid-template-columns:1fr; }
+    .stack-grid{ grid-template-columns:1fr; }
+    .hero{ padding:100px 0 84px; }
+    section{ padding:88px 0; }
+    .compare-row{ grid-template-columns:1fr; gap:8px; }
+    .idea-card{ padding:30px 26px; }
+  }
+</style>
 </head>
 <body>
-<h1>oracle</h1>
-<p>Site coming soon.</p>
-<p><a href="https://github.com/pavanchow/oracle">View repository</a></p>
+
+<header class="top">
+  <div class="top-inner">
+    <span class="brand"><span class="dot" aria-hidden="true"></span>Oracle</span>
+    <nav class="top-nav" aria-label="Primary">
+      <a href="#idea">Idea</a>
+      <a href="#graph">Attack path</a>
+      <a href="#oql">OQL</a>
+      <a href="#compare">Compare</a>
+      <a href="https://github.com/pavanchow/oracle">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero" id="top">
+    <div class="col">
+      <div class="eyebrow">Identity &amp; network attack-path engine</div>
+      <h1 class="hero-title">Query <span class="accent">attack paths</span>,<br>not rows.</h1>
+      <p class="tagline">Oracle is a query language whose result is an attack path, not a set of rows.</p>
+      <p class="subline">Ask how a principal can reach a capability. Oracle returns the concrete chain of permissions and trust that gets them there, hop by hop, with the exact edge behind each step.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/pavanchow/oracle">View on GitHub</a>
+        <a class="btn btn-ghost" href="#oql">See OQL examples</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="idea">
+    <div class="col">
+      <div class="section-head">
+        <div class="kicker">The core idea</div>
+        <h2>Standard tools map assets.<br>Oracle maps attack paths.</h2>
+        <p class="lede">An inventory tool tells you a role exists and a bucket is public. Oracle tells you that a user reaches full control in five hops, and names the exact permission or trust edge at each one.</p>
+      </div>
+      <div class="idea-grid">
+        <div class="idea-card no">
+          <h3>What inventory gives you</h3>
+          <p>Rows. A list of roles, a list of policies, a list of open ports. You still reconstruct, by hand, whether any of it chains into a real escalation.</p>
+        </div>
+        <div class="idea-card yes">
+          <h3>What Oracle gives you</h3>
+          <p>A walkable chain. <code>user:alice</code> to <code>group:developers</code> to <code>role:build-runner</code> to <code>role:deployer</code> to <code>role:admin</code>, each hop labeled with the edge that made it possible.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="graph">
+    <div class="col">
+      <div class="section-head">
+        <div class="kicker">Concrete example</div>
+        <h2>An escalation chain, as Oracle returns it</h2>
+        <p class="lede">This is the shape of an actual Oracle result: a directed walk from a low-privilege user to full control over every resource.</p>
+      </div>
+
+      <div class="graph-panel">
+        <svg viewBox="0 0 1500 230" role="img" aria-labelledby="graphTitle graphDesc" xmlns="http://www.w3.org/2000/svg">
+          <title id="graphTitle">Attack path from user alice to all resources</title>
+          <desc id="graphDesc">user:alice is member_of group:developers. group:developers can_assume role:build-runner via sts:AssumeRole. role:build-runner can_assume role:deployer via sts:AssumeRole. role:deployer has_permission iam:PutRolePolicy on role:admin. role:admin has_permission wildcard on resource:all-resources.</desc>
+
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#5c6066"></path>
+            </marker>
+          </defs>
+
+          <!-- edges -->
+          <g stroke="#3a3f45" stroke-width="1.4" fill="none">
+            <line x1="150" y1="152" x2="240" y2="152" marker-end="url(#arrow)"></line>
+            <line x1="410" y1="152" x2="500" y2="152" marker-end="url(#arrow)"></line>
+            <line x1="680" y1="152" x2="770" y2="152" marker-end="url(#arrow)"></line>
+            <line x1="920" y1="152" x2="1010" y2="152" marker-end="url(#arrow)"></line>
+            <line x1="1140" y1="152" x2="1230" y2="152" marker-end="url(#arrow)"></line>
+          </g>
+
+          <!-- edge labels -->
+          <g font-family="-apple-system, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#5fd0c4" text-anchor="middle">
+            <text x="195" y="112">member_of</text>
+            <text x="455" y="112">can_assume</text>
+            <text x="725" y="112">can_assume</text>
+            <text x="965" y="112">has_permission</text>
+            <text x="1185" y="112">has_permission</text>
+          </g>
+          <g font-family="SF Mono, Consolas, monospace" font-size="11" fill="#5c6066" text-anchor="middle">
+            <text x="455" y="130">sts:AssumeRole</text>
+            <text x="725" y="130">sts:AssumeRole</text>
+            <text x="965" y="130">iam:PutRolePolicy</text>
+            <text x="1185" y="130">*</text>
+          </g>
+
+          <!-- nodes: pills -->
+          <g font-family="-apple-system, Segoe UI, sans-serif" font-size="14" font-weight="600">
+            <rect x="10" y="130" width="140" height="44" rx="22" fill="#0e1013" stroke="#5fd0c4" stroke-width="1.5"></rect>
+            <text x="80" y="157" text-anchor="middle" fill="#f2f3f5">user:alice</text>
+
+            <rect x="240" y="130" width="170" height="44" rx="22" fill="#0e1013" stroke="#2a2e33" stroke-width="1.5"></rect>
+            <text x="325" y="157" text-anchor="middle" fill="#f2f3f5">group:developers</text>
+
+            <rect x="500" y="130" width="180" height="44" rx="22" fill="#0e1013" stroke="#2a2e33" stroke-width="1.5"></rect>
+            <text x="590" y="157" text-anchor="middle" fill="#f2f3f5">role:build-runner</text>
+
+            <rect x="770" y="130" width="150" height="44" rx="22" fill="#0e1013" stroke="#2a2e33" stroke-width="1.5"></rect>
+            <text x="845" y="157" text-anchor="middle" fill="#f2f3f5">role:deployer</text>
+
+            <rect x="1010" y="130" width="130" height="44" rx="22" fill="#0e1013" stroke="#2a2e33" stroke-width="1.5"></rect>
+            <text x="1075" y="157" text-anchor="middle" fill="#f2f3f5">role:admin</text>
+
+            <rect x="1230" y="130" width="260" height="44" rx="22" fill="#0e1013" stroke="#e0687a" stroke-width="1.5"></rect>
+            <text x="1360" y="157" text-anchor="middle" fill="#f2f3f5">resource:all-resources</text>
+          </g>
+        </svg>
+      </div>
+      <p class="graph-caption">user:alice, member of developers, assumes build-runner, assumes deployer, grants itself admin, which reaches everything.</p>
+    </div>
+  </section>
+
+  <section id="oql">
+    <div class="col">
+      <div class="section-head">
+        <div class="kicker">Oracle Query Language</div>
+        <h2>OQL, by example</h2>
+        <p class="lede">A hand-written lexer and recursive-descent parser. Path semantics are built into the language, not bolted onto a general-purpose graph query language.</p>
+      </div>
+
+      <div class="oql-list">
+        <div class="oql-block"><code><span class="kw">PATHS FROM</span> <span class="fn">user</span>(<span class="str">"alice"</span>) <span class="kw">TO</span> <span class="fn">action</span>(<span class="str">"*"</span>)</code></div>
+        <div class="oql-block"><code><span class="kw">PATHS FROM</span> <span class="fn">user</span>(<span class="str">"alice"</span>) <span class="kw">TO</span> <span class="fn">resource</span>(<span class="str">"prod-artifacts"</span>)</code></div>
+        <div class="oql-block"><code><span class="kw">PATHS FROM</span> <span class="fn">user</span>(<span class="str">"alice"</span>) <span class="kw">TO</span> <span class="fn">action</span>(<span class="str">"*"</span>) <span class="kw">VIA</span> can_assume, has_permission <span class="kw">WITHIN</span> <span class="num">4</span> <span class="kw">HOPS</span></code></div>
+        <div class="oql-block"><code><span class="kw">ESCALATE FROM</span> <span class="fn">user</span>(<span class="str">"alice"</span>)</code></div>
+        <div class="oql-block"><code><span class="kw">BLAST</span> <span class="fn">role</span>(<span class="str">"deployer"</span>)</code></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="col">
+      <div class="section-head">
+        <div class="kicker">How it's different</div>
+        <h2>Prior art, and where Oracle diverges</h2>
+      </div>
+      <div class="compare-list">
+        <div class="compare-row">
+          <div class="tool">BloodHound</div>
+          <div class="desc">Maps Active Directory attack paths in a Neo4j graph. Powerful, but AD-specific and driven by raw Cypher.</div>
+        </div>
+        <div class="compare-row">
+          <div class="tool">PMapper</div>
+          <div class="desc">Models AWS IAM as a graph and answers reachability, in Python.</div>
+        </div>
+        <div class="compare-row">
+          <div class="tool">Cartography / Prowler</div>
+          <div class="desc">Inventory cloud assets and flag misconfigurations. They map what exists, not what an attacker can chain.</div>
+        </div>
+        <div class="compare-row">
+          <div class="tool">Neo4j / Cypher</div>
+          <div class="desc">A general graph query language. Attack paths are expressible but not first class, you hand-write the traversal every time.</div>
+        </div>
+        <div class="compare-row oracle-row">
+          <div class="tool">Oracle</div>
+          <div class="desc">The attack path is the primitive. Cloud-and-network native, not tied to one directory service. Every result is a walkable chain with the permission or trust edge at each hop.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="stack">
+    <div class="col">
+      <div class="section-head">
+        <div class="kicker">Stack &amp; status</div>
+        <h2>Built in Rust, bounded by design</h2>
+      </div>
+      <div class="stack-grid">
+        <div class="stat-card">
+          <div class="label">Language</div>
+          <div class="val">Rust. A single static binary via cargo.</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Parser</div>
+          <div class="val">Hand-written OQL lexer and recursive-descent parser, no combinator dependency.</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Path engine</div>
+          <div class="val">Bounded, edge-aware depth-capped search on <code>petgraph</code>. Default 8 hops, 1000 results, reports truncation.</div>
+        </div>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="status-dot done" aria-hidden="true"></span>
+          <span><b>Working.</b> Graph model, JSON loader, edge-aware bounded attack-path engine, the full OQL parser (<code>PATHS</code>, <code>ESCALATE</code>, <code>BLAST</code>), and a CLI.</span>
+        </div>
+        <div class="status-line">
+          <span class="status-dot next" aria-hidden="true"></span>
+          <span><b>Next.</b> An AWS IAM importer, then an HTTP API and graph visualization UI, then an MCP server for agent access.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="col">
+    <p>Oracle is open source. <a href="https://github.com/pavanchow/oracle">github.com/pavanchow/oracle</a></p>
+  </div>
+</footer>
+
 </body>
 </html>

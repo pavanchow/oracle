@@ -32,6 +32,8 @@ pub enum Query {
         via: Vec<String>,
         /// If set, cap path length to this many hops.
         within: Option<usize>,
+        /// If set, restrict an `action(...)` target to grants on this resource ARN.
+        on_resource: Option<String>,
     },
     Escalate {
         from_kind: String,
@@ -192,6 +194,7 @@ pub fn parse(src: &str) -> Result<Query> {
             };
             let mut via = Vec::new();
             let mut within = None;
+            let mut on_resource = None;
             loop {
                 if p.keyword_ahead("VIA") {
                     p.next();
@@ -208,6 +211,13 @@ pub fn parse(src: &str) -> Result<Query> {
                         .map_err(|_| anyhow!("WITHIN expects a number, found `{n}`"))?;
                     p.expect_word("HOPS")?;
                     within = Some(hops);
+                } else if p.keyword_ahead("ON") {
+                    p.next();
+                    let (kind, arn) = p.node_ref()?;
+                    if !kind.eq_ignore_ascii_case("resource") {
+                        bail!("ON expects resource(\"arn\"), found `{kind}`");
+                    }
+                    on_resource = Some(arn);
                 } else {
                     break;
                 }
@@ -218,6 +228,7 @@ pub fn parse(src: &str) -> Result<Query> {
                 to,
                 via,
                 within,
+                on_resource,
             }
         }
         "ESCALATE" => {
@@ -255,6 +266,7 @@ mod tests {
                 },
                 via: vec![],
                 within: None,
+                on_resource: None,
             }
         );
     }
@@ -270,8 +282,22 @@ mod tests {
                 to: Target::Action("*".into()),
                 via: vec![],
                 within: None,
+                on_resource: None,
             }
         );
+    }
+
+    #[test]
+    fn parses_on_resource() {
+        let q =
+            parse(r#"PATHS FROM user("a") TO action("s3:GetObject") ON resource("arn:aws:s3:::b/*")"#)
+                .unwrap();
+        match q {
+            Query::Paths { on_resource, .. } => {
+                assert_eq!(on_resource.as_deref(), Some("arn:aws:s3:::b/*"))
+            }
+            _ => panic!("expected Paths"),
+        }
     }
 
     #[test]
