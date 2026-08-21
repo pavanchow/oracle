@@ -83,6 +83,8 @@ BLAST role("deployer")
 
 ## Roadmap
 
+### v0.1 (shipped)
+
 1. Foundation (done): graph model, JSON loader, edge-aware bounded path engine, CLI.
 2. OQL parser (done): hand-written lexer + recursive descent. `PATHS`, `ESCALATE`,
    `BLAST`, node and `action(...)` targets, `VIA` edge filter, `WITHIN n HOPS`.
@@ -110,7 +112,18 @@ BLAST role("deployer")
     a compromised Lambda assuming its trusted role shows up as an attack path.
 12. API request timeout (done): `/query` runs off the async pool with a 3s ceiling
     (504 on timeout), on top of the engine's visit budget.
-13. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
+
+### v0.2 (planned)
+
+13. Deny/NotAction evaluation. The large one. Today every result is a *potential*
+    path, since explicit `Deny` and `NotAction`/`NotResource` are not enforced. Doing
+    it right means an IAM policy-evaluation pass (explicit deny overrides allow),
+    Service Control Policies (SCP) across the org, permission boundaries, and session
+    policies. This turns "potential path" into "reachable path" and is the headline
+    v0.2 feature.
+14. Escalation-technique coverage beyond the current top primitives, and confidence
+    scoring per finding.
+15. Multi-account graphs (assume-role across accounts) and a GCP importer.
 
 ## IAM model (implemented, ready for the importer)
 

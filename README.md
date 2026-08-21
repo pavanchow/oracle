@@ -149,4 +149,6 @@ privilege-boundary crossing, path search is compute-bounded, and a grant whose r
 ARN is an identity in the account resolves to that identity, so PassRole escalation
 traverses on real imported data. Service and Federated trust principals are modeled, so a
 compromised Lambda assuming its role shows as a path, and the API has a request timeout.
-Next: Deny/NotAction evaluation.
+This is **v0.1**. Results are potential paths. v0.2 adds Deny/NotAction evaluation (IAM
+policy evaluation with explicit-deny, SCPs, and permission boundaries), which turns a
+potential path into a proven reachable one.
