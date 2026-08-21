@@ -86,9 +86,11 @@ BLAST role("deployer")
 1. Foundation (done): graph model, JSON loader, edge-aware bounded path engine, CLI.
 2. OQL parser (done): hand-written lexer + recursive descent. `PATHS`, `ESCALATE`,
    `BLAST`, node and `action(...)` targets, `VIA` edge filter, `WITHIN n HOPS`.
-3. AWS IAM importer into the JSON model (see model decisions below).
-4. axum API, then the graph visualization UI.
-5. MCP server for agent access.
+3. AWS IAM importer (done): consumes `aws iam get-account-authorization-details`
+   and emits the graph. See `src/import_aws.rs` and `data/aws-authdetails-sample.json`.
+4. Deny/NotAction evaluation and escalation-technique rules (auto-detect bundles).
+5. axum API, then the graph visualization UI.
+6. MCP server for agent access.
 
 ## IAM model (implemented, ready for the importer)
 

@@ -32,6 +32,15 @@ enum Cmd {
         #[arg(long, default_value = "data/sample-graph.json")]
         graph: String,
     },
+    /// Import `aws iam get-account-authorization-details` JSON into a graph.
+    ImportAws {
+        /// Path to the get-account-authorization-details JSON.
+        #[arg(long)]
+        input: String,
+        /// Where to write the graph JSON (defaults to stdout).
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 fn print_paths(g: &Graph, r: &PathSet) {
@@ -108,6 +117,22 @@ fn main() -> Result<()> {
                         }
                     }
                 }
+            }
+        }
+        Cmd::ImportAws { input, output } => {
+            let json = std::fs::read_to_string(&input)?;
+            let doc = oracle::import_aws::import(&json)?;
+            let out = doc.to_json_pretty()?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, out)?;
+                    eprintln!(
+                        "wrote {} nodes, {} edges to {path}",
+                        doc.nodes.len(),
+                        doc.edges.len()
+                    );
+                }
+                None => println!("{out}"),
             }
         }
     }

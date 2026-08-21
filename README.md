@@ -35,6 +35,21 @@ Example output:
 
 The raw path command is still there: `cargo run -- paths --from alice --to all-resources`.
 
+## Import a real AWS account
+
+Point Oracle at a live account by feeding it the IAM authorization details:
+
+```
+aws iam get-account-authorization-details > authdetails.json
+cargo run -- import-aws --input authdetails.json --output aws-graph.json
+cargo run -- query 'PATHS FROM user("alice") TO action("*")' --graph aws-graph.json
+```
+
+The importer builds users, groups, roles and resource nodes, `member_of` edges,
+`can_assume` edges from role trust policies, and `has_permission` edges carrying the
+action, resource ARN, and any `Condition` block. `Deny` and `NotAction`/`NotResource`
+are not evaluated yet, so results are potential paths.
+
 ## OQL
 
 - `PATHS FROM <node> TO <node>` every attack path between two nodes.
@@ -66,5 +81,6 @@ JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
 ## Status
 
 Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
-parser (`PATHS`, `ESCALATE`, `BLAST`), and a CLI. Next: AWS IAM importer, then the
-HTTP API and the graph visualization UI, then an MCP server.
+parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
+importer, and a CLI. Next: Deny/NotAction evaluation and escalation-technique rules,
+then the HTTP API and graph visualization UI, then an MCP server.

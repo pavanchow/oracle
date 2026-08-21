@@ -1,0 +1,86 @@
+{
+  "UserDetailList": [
+    {
+      "UserName": "alice",
+      "UserId": "AIDAALICE",
+      "Arn": "arn:aws:iam::123456789012:user/alice",
+      "GroupList": ["developers"],
+      "AttachedManagedPolicies": [],
+      "UserPolicyList": []
+    }
+  ],
+  "GroupDetailList": [
+    {
+      "GroupName": "developers",
+      "GroupId": "AGPADEV",
+      "Arn": "arn:aws:iam::123456789012:group/developers",
+      "AttachedManagedPolicies": [],
+      "GroupPolicyList": [
+        {
+          "PolicyName": "dev-inline",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              { "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::prod-artifacts" },
+              { "Effect": "Allow", "Action": "sts:AssumeRole", "Resource": "arn:aws:iam::123456789012:role/deployer" }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "RoleDetailList": [
+    {
+      "RoleName": "deployer",
+      "RoleId": "AROADEPLOY",
+      "Arn": "arn:aws:iam::123456789012:role/deployer",
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "AWS": "arn:aws:iam::123456789012:user/alice" },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "AttachedManagedPolicies": [
+        { "PolicyName": "deployer-managed", "PolicyArn": "arn:aws:iam::123456789012:policy/deployer-managed" }
+      ],
+      "RolePolicyList": [
+        {
+          "PolicyName": "deployer-inline",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              { "Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::prod-artifacts/*"] },
+              {
+                "Effect": "Allow",
+                "Action": "s3:PutObject",
+                "Resource": "arn:aws:s3:::prod-artifacts/*",
+                "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "Policies": [
+    {
+      "PolicyName": "deployer-managed",
+      "Arn": "arn:aws:iam::123456789012:policy/deployer-managed",
+      "DefaultVersionId": "v1",
+      "PolicyVersionList": [
+        {
+          "Document": {
+            "Version": "2012-10-17",
+            "Statement": [{ "Effect": "Allow", "Action": "logs:*", "Resource": "*" }]
+          },
+          "VersionId": "v1",
+          "IsDefaultVersion": true
+        }
+      ]
+    }
+  ]
+}

@@ -2,41 +2,49 @@ use anyhow::{bail, Context, Result};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::{Bfs, EdgeRef};
 use petgraph::Direction::Outgoing;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+pub mod import_aws;
 pub mod query;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: String,
     pub kind: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub attrs: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {
     pub from: String,
     pub to: String,
     pub kind: String,
     /// The IAM action granted, if any (e.g. `s3:GetObject`). Supports `*` globs.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
     /// The resource ARN the grant applies to, if any. Supports `*`/`?` globs.
     /// `None` means the grant is not resource-scoped (applies to any resource).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
     /// IAM `Condition` block, captured verbatim so a path gated on MFA, source IP,
     /// etc. can be flagged conditional. The engine does not evaluate these yet.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditions: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawGraph {
-    nodes: Vec<Node>,
-    edges: Vec<Edge>,
+/// The on-disk graph document: what the loader reads and the importer emits.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct GraphDoc {
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+}
+
+impl GraphDoc {
+    pub fn to_json_pretty(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
 }
 
 /// One hop in an attack path: the exact edge taken and the node it lands on.
@@ -96,10 +104,14 @@ impl Graph {
     }
 
     pub fn from_json(text: &str) -> Result<Graph> {
-        let raw: RawGraph = serde_json::from_str(text).context("parsing graph JSON")?;
+        let doc: GraphDoc = serde_json::from_str(text).context("parsing graph JSON")?;
+        Graph::from_doc(doc)
+    }
+
+    pub fn from_doc(doc: GraphDoc) -> Result<Graph> {
         let mut g = DiGraph::<Node, Edge>::new();
         let mut index = HashMap::new();
-        for n in raw.nodes {
+        for n in doc.nodes {
             // Duplicate ids would silently resolve queries to the wrong node.
             if index.contains_key(&n.id) {
                 bail!("duplicate node id `{}`", n.id);
@@ -108,7 +120,7 @@ impl Graph {
             let idx = g.add_node(n);
             index.insert(id, idx);
         }
-        for e in raw.edges {
+        for e in doc.edges {
             let from = *index
                 .get(&e.from)
                 .with_context(|| format!("edge references unknown node {}", e.from))?;
