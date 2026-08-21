@@ -81,9 +81,14 @@ curl -s localhost:8080/query -H 'content-type: application/json' \
   -d '{"oql":"PATHS FROM user(\"alice\") TO action(\"*\")"}'
 ```
 
+- `GET /` a query-console UI: type OQL, see each attack path as a node chain with
+  edge labels and severity-ranked technique badges. Served from the same binary.
 - `GET /health` liveness.
 - `GET /graph` the loaded graph JSON (for visualization).
 - `POST /query {"oql":"..."}` structured result, or 400 with `{"error":...}`.
+
+Path search is bounded by a visit budget (`Limits::max_visits`), so a dense graph
+cannot pin the CPU per request.
 
 ## OQL
 
@@ -118,6 +123,5 @@ JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
 Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
 parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
 importer, structured JSON query results, exploit-technique detection, and an HTTP
-API. Next: a graph visualization UI on top of the API, an `ESCALATE`
-privilege-boundary fix, a per-request compute guard on the API, then Deny/NotAction
-evaluation and an MCP server.
+API with a query-console UI. `ESCALATE` requires a real privilege-boundary crossing,
+and path search is compute-bounded. Next: Deny/NotAction evaluation, then an MCP server.

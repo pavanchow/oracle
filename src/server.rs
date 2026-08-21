@@ -10,7 +10,7 @@ use anyhow::Result;
 use axum::{
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
 };
@@ -35,6 +35,7 @@ pub fn serve(graph_path: &str, port: u16) -> Result<()> {
     let state = Arc::new(AppState { graph, graph_json });
 
     let app = Router::new()
+        .route("/", get(index))
         .route("/health", get(|| async { "ok" }))
         .route("/graph", get(get_graph))
         .route("/query", post(post_query))
@@ -43,13 +44,15 @@ pub fn serve(graph_path: &str, port: u16) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-        eprintln!(
-            "oracle serving on http://127.0.0.1:{port}  (POST /query, GET /graph, GET /health)"
-        );
+        eprintln!("oracle console on http://127.0.0.1:{port}  (UI at /, POST /query, GET /graph)");
         axum::serve(listener, app).await?;
         Ok::<(), anyhow::Error>(())
     })?;
     Ok(())
+}
+
+async fn index() -> Html<&'static str> {
+    Html(include_str!("ui.html"))
 }
 
 async fn get_graph(State(s): State<Arc<AppState>>) -> Json<Value> {

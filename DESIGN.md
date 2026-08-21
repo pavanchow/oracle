@@ -94,12 +94,11 @@ BLAST role("deployer")
    over the principals a path yields, inspecting the permissions each holds. They are
    NOT baked into the graph as synthetic nodes, so the graph stays pure and detection
    works on real importer output. Every path carries a `techniques` array.
-6. Graph visualization UI on top of the API.
-7. `ESCALATE` privilege-boundary fix (require a `can_assume` hop or a strictly
-   higher-privilege target; today it is filtered reachability).
-8. Per-request compute guard on the HTTP API (a visit budget or timeout; path
-   enumeration is exponential in the worst case). The server binds to 127.0.0.1, so
-   this is not yet remotely exploitable, but it is required before public deployment.
+6. Graph query-console UI (done): `src/ui.html`, served at `/`. Renders each path as
+   a node chain with edge labels and severity-ranked technique badges.
+7. `ESCALATE` privilege-boundary fix (done): `escalation_from` requires a `can_assume`
+   hop, so reaching your own group is no longer reported as escalation.
+8. Compute guard (done): `Limits::max_visits` bounds edges examined per search.
 9. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
 10. MCP server for agent access.
 

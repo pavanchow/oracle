@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oracle console</title>
+<style>
+  :root {
+    --bg: #fbfbf9; --panel: #fff; --ink: #16181a; --muted: #6b7280;
+    --line: #e6e6e2; --accent: #0f7d74; --accent-soft: #e6f2f0;
+    --user: #2563eb; --group: #7c3aed; --role: #b45309; --resource: #0f766e;
+    --host: #475569; --bundle: #9333ea; --external: #6b7280;
+    --crit: #b91c1c; --high: #c2410c; --med: #a16207;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header { padding: 26px 28px 18px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  h1 .stat { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 10px; }
+  .sub { color: var(--muted); margin-top: 4px; font-size: 14px; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 28px 60px; }
+  .bar { display: flex; gap: 10px; }
+  input[type=text] { flex: 1; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 10px; font: inherit; background: var(--panel); }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  button { padding: 12px 18px; border: none; border-radius: 10px; background: var(--accent);
+    color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: var(--accent-soft); color: var(--accent); font-weight: 500;
+    padding: 7px 12px; border-radius: 999px; }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .note { color: var(--muted); font-size: 13px; margin: 18px 0 8px; }
+  .err { color: var(--crit); background: #fef2f2; border: 1px solid #fecaca;
+    padding: 12px 14px; border-radius: 10px; margin-top: 16px; }
+  .path { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-top: 14px; }
+  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; }
+  .k-user { background: var(--user); } .k-group { background: var(--group); }
+  .k-role { background: var(--role); } .k-resource { background: var(--resource); }
+  .k-host { background: var(--host); } .k-bundle { background: var(--bundle); }
+  .k-external { background: var(--external); }
+  .edge { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+  .edge b { color: var(--ink); font-weight: 600; }
+  .edge .cond { color: var(--high); }
+  .arrow { color: var(--muted); }
+  .tech { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge { font-size: 12px; padding: 4px 10px; border-radius: 8px; font-weight: 600; }
+  .b-critical { background: #fef2f2; color: var(--crit); border: 1px solid #fecaca; }
+  .b-high { background: #fff7ed; color: var(--high); border: 1px solid #fed7aa; }
+  .b-medium { background: #fefce8; color: var(--med); border: 1px solid #fde68a; }
+  .badge small { font-weight: 400; opacity: 0.8; }
+  .nodes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  code { background: #f3f4f2; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Oracle console <span class="stat" id="stat"></span></h1>
+  <div class="sub">Query attack paths over the loaded identity and network graph.</div>
+</header>
+<main>
+  <div class="bar">
+    <input id="q" type="text" value='PATHS FROM user("alice") TO action("*")' spellcheck="false">
+    <button onclick="run()">Run</button>
+  </div>
+  <div class="examples" id="examples"></div>
+  <div id="out"></div>
+</main>
+<script>
+const EXAMPLES = [
+  'PATHS FROM user("alice") TO action("*")',
+  'PATHS FROM user("alice") TO action("s3:*")',
+  'ESCALATE FROM role("deployer")',
+  'BLAST role("deployer")',
+];
+const out = document.getElementById('out');
+const qInput = document.getElementById('q');
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function kind(label){ return label.split(':')[0]; }
+function pill(label){ return `<span class="pill k-${esc(kind(label))}">${esc(label)}</span>`; }
+
+function edgeLabel(h){
+  let t = `<b>${esc(h.edge)}</b>`;
+  if (h.action) t += ' ' + esc(h.action);
+  if (h.resource) t += ' <span style="opacity:.7">on ' + esc(h.resource) + '</span>';
+  if (h.conditional) t += ' <span class="cond">(conditional)</span>';
+  return `<span class="edge"><span class="arrow">&rarr;</span>${t}<span class="arrow">&rarr;</span></span>`;
+}
+
+function renderPaths(d){
+  if (!d.count){ out.innerHTML = '<div class="note">No attack path found.</div>'; return; }
+  let html = `<div class="note">${d.count} attack path${d.count>1?'s':''}${d.truncated?' (truncated)':''}</div>`;
+  for (const p of d.paths){
+    let chain = pill(p.start);
+    for (const h of p.hops) chain += edgeLabel(h) + pill(h.to);
+    let tech = '';
+    if (p.techniques && p.techniques.length){
+      tech = '<div class="tech">' + p.techniques.map(t =>
+        `<span class="badge b-${esc(t.severity)}">${esc(t.technique)} <small>via ${esc(t.principal)}</small></span>`
+      ).join('') + '</div>';
+    }
+    html += `<div class="path"><div class="chain">${chain}</div>${tech}</div>`;
+  }
+  out.innerHTML = html;
+}
+
+function renderNodes(d, label){
+  if (!d.count){ out.innerHTML = `<div class="note">${label}: none.</div>`; return; }
+  out.innerHTML = `<div class="note">${d.count} ${label}</div>` +
+    '<div class="nodes">' + d.nodes.map(pill).join('') + '</div>';
+}
+
+async function run(){
+  const oql = qInput.value.trim();
+  out.innerHTML = '<div class="note">Running...</div>';
+  try {
+    const res = await fetch('/query', {
+      method: 'POST', headers: {'content-type':'application/json'},
+      body: JSON.stringify({ oql })
+    });
+    const d = await res.json();
+    if (!res.ok || d.error){ out.innerHTML = `<div class="err">${esc(d.error || 'query failed')}</div>`; return; }
+    if (d.kind === 'paths') renderPaths(d);
+    else if (d.kind === 'escalation') renderNodes(d, 'escalation target(s)');
+    else if (d.kind === 'reach') renderNodes(d, 'node(s) reachable');
+    else renderNodes(d, 'result(s)');
+  } catch(e){ out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+qInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+
+document.getElementById('examples').innerHTML = EXAMPLES.map(x =>
+  `<button class="ghost" onclick='qInput.value=${JSON.stringify(x)};run()'>${esc(x)}</button>`
+).join('');
+
+fetch('/graph').then(r => r.json()).then(g => {
+  document.getElementById('stat').textContent = `${g.nodes.length} nodes, ${g.edges.length} edges`;
+}).catch(()=>{});
+
+run();
+</script>
+</body>
+</html>
