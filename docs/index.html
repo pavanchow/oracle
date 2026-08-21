@@ -61,6 +61,25 @@
     .card p{color:var(--muted);font-size:15px}
     footer{padding:64px 0;border-top:1px solid var(--line);text-align:center;color:var(--muted)}
     footer .name{color:var(--ink);font-weight:600}
+    .demo{max-width:820px;margin:40px auto 0;background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:24px 26px}
+    .demo .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px}
+    .demo label{font-size:12px;color:var(--muted);font-family:var(--mono);display:flex;flex-direction:column;gap:6px}
+    .demo select{font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);min-width:220px}
+    .demo .btns{display:flex;gap:8px;flex-wrap:wrap}
+    .demo button{font-family:var(--mono);font-size:13px;padding:9px 18px;border-radius:980px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;font-weight:600}
+    .demo button:hover{background:#ececea}
+    .demo button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .demo .oql{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
+    .demo .out{margin-top:10px;background:#12211f;color:#e8f0ee;border-radius:14px;padding:20px 22px;font-family:var(--mono);font-size:13.5px;line-height:1.8;overflow-x:auto;min-height:56px}
+    .demo .out .arrow{color:#5eead4}
+    .demo .out .node{color:#fcd34d}
+    .demo .out .muted2{color:#7d8b86}
+    .demo .badge{display:inline-block;font-size:11px;padding:2px 9px;border-radius:980px;margin-left:2px;font-weight:700}
+    .demo .badge.critical{background:var(--crit);color:#fff}
+    .demo .badge.high{background:#b8860b;color:#fff}
+    .demo details{margin-top:16px;font-size:13px;color:var(--muted)}
+    .demo details summary{cursor:pointer;font-family:var(--mono);color:var(--accent)}
+    .demo .legend-list{margin-top:10px;line-height:1.9;font-family:var(--mono);font-size:12.5px}
   </style>
 </head>
 <body>
@@ -93,6 +112,29 @@
 <span class="path">alice</span> <span class="arrow">--sts:AssumeRole--&gt;</span> role(<span class="str">"ci-runner"</span>)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="arrow">--iam:PassRole--&gt;</span> role(<span class="str">"deployer"</span>)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="arrow">--iam:PutUserPolicy--&gt;</span> action(<span class="str">"iam:*"</span>)
+      </div>
+
+      <div class="demo" id="demo">
+        <p class="eyebrow" style="margin-bottom:16px">Run a real query, right here</p>
+        <div class="row">
+          <label>Start principal
+            <select id="demoStart"></select>
+          </label>
+          <label>Target capability (PATHS only)
+            <select id="demoTarget"></select>
+          </label>
+        </div>
+        <div class="btns">
+          <button id="btnPaths" type="button">PATHS</button>
+          <button id="btnEscalate" type="button">ESCALATE</button>
+          <button id="btnBlast" type="button">BLAST</button>
+        </div>
+        <p class="oql" id="demoOql"></p>
+        <div class="out" id="demoOut"></div>
+        <details>
+          <summary>The graph this is searching</summary>
+          <div class="legend-list" id="demoLegend"></div>
+        </details>
       </div>
     </section>
 
@@ -138,5 +180,407 @@
       Oracle is a query language whose results are attack paths across identity and network graphs, not rows. You ask how a principal can reach a capability, and Oracle returns the concrete chain of permissions and trust that gets them there, hop by hop, with the exact edge behind each step. It imports AWS IAM (get-account-authorization-details) into a graph and answers privilege escalation and lateral movement queries in OQL, for example PATHS FROM user("alice") TO action("*"), ESCALATE FROM role("ci-runner"), and BLAST role("deployer"). It ships as a CLI, an HTTP API, and an MCP server. Source at github.com/pavanchow/oracle. By Pavan Nallamothu.
     </div>
   </noscript>
+
+  <script>
+  (function(){
+    "use strict";
+
+    var NODES = [
+      {id:"alice", kind:"user"},
+      {id:"contractor", kind:"user"},
+      {id:"vendors", kind:"group"},
+      {id:"ci-runner", kind:"role"},
+      {id:"deployer", kind:"role"},
+      {id:"admin", kind:"role"},
+      {id:"customer-pii", kind:"resource"},
+      {id:"artifacts", kind:"resource"},
+      {id:"secrets", kind:"resource"},
+      {id:"all", kind:"resource"}
+    ];
+
+    var EDGES = [
+      {from:"alice", to:"ci-runner", kind:"can_assume", action:"sts:AssumeRole"},
+      {from:"ci-runner", to:"deployer", kind:"has_permission", action:"iam:PassRole"},
+      {from:"deployer", to:"admin", kind:"has_permission", action:"iam:PutRolePolicy"},
+      {from:"admin", to:"all", kind:"has_permission", action:"*"},
+      {from:"contractor", to:"vendors", kind:"member_of"},
+      {from:"vendors", to:"customer-pii", kind:"has_permission", action:"s3:GetObject", resource:"arn:aws:s3:::customer-pii/*"},
+      {from:"deployer", to:"artifacts", kind:"has_permission", action:"s3:PutObject", resource:"arn:aws:s3:::artifacts/*"},
+      {from:"deployer", to:"secrets", kind:"has_permission", action:"secretsmanager:GetSecretValue"}
+    ];
+
+    var ESCALATION_ACTIONS = [
+      "iam:PassRole",
+      "iam:CreatePolicyVersion",
+      "iam:PutUserPolicy",
+      "iam:PutRolePolicy",
+      "iam:AttachUserPolicy",
+      "iam:AttachRolePolicy",
+      "iam:UpdateLoginProfile",
+      "iam:CreateAccessKey",
+      "lambda:UpdateFunctionCode"
+    ];
+
+    var NODE_BY_ID = {};
+    NODES.forEach(function(n){ NODE_BY_ID[n.id] = n; });
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, function(c){
+        return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+      });
+    }
+
+    function nodeKind(id){ var n = NODE_BY_ID[id]; return n ? n.kind : "?"; }
+    function nodeLabel(id){ return nodeKind(id) + ":" + id; }
+    function isPrincipalKind(k){ return k === "user" || k === "group" || k === "role"; }
+    function edgesFrom(id){ return EDGES.filter(function(e){ return e.from === id; }); }
+
+    // Mirrors src/lib.rs action_matches(query, grant): both sides may end in "*".
+    function actionMatches(query, grant){
+      if(query === "*") return true;
+      if(query.charAt(query.length - 1) === "*"){
+        var qpfx = query.slice(0, -1);
+        if(grant.indexOf(qpfx) === 0) return true;
+        if(grant === "*") return true;
+        if(grant.charAt(grant.length - 1) === "*"){
+          var gpfx = grant.slice(0, -1);
+          if(qpfx.indexOf(gpfx) === 0) return true;
+        }
+        return false;
+      }
+      if(grant === query || grant === "*") return true;
+      if(grant.charAt(grant.length - 1) === "*"){
+        var gpfx2 = grant.slice(0, -1);
+        if(query.indexOf(gpfx2) === 0) return true;
+      }
+      return false;
+    }
+
+    // Mirrors src/lib.rs wildcard_match: "*" any run, "?" one char.
+    function wildcardMatch(pattern, text){
+      var p = pattern, t = text;
+      var i = 0, j = 0, star = -1, mark = 0;
+      while(j < t.length){
+        if(i < p.length && (p[i] === "?" || p[i] === t[j])){ i++; j++; }
+        else if(i < p.length && p[i] === "*"){ star = i; mark = j; i++; }
+        else if(star !== -1){ i = star + 1; mark++; j = mark; }
+        else return false;
+      }
+      while(i < p.length && p[i] === "*") i++;
+      return i === p.length;
+    }
+
+    function resourceOk(edgeResource, query){
+      if(query === null || query === undefined) return true;
+      if(edgeResource === null || edgeResource === undefined) return true;
+      return wildcardMatch(edgeResource, query) || wildcardMatch(query, edgeResource);
+    }
+
+    function isEscalationAction(grant){
+      if(grant === "*") return true;
+      return ESCALATION_ACTIONS.some(function(prim){ return actionMatches(prim, grant); });
+    }
+
+    // Mirrors src/lib.rs Graph::walk: DFS over simple paths, honoring VIA, depth
+    // and visit caps, one attack path per time it lands on target.
+    function walk(start, cur, target, viaSet, visited, steps, out, limits, state){
+      if(out.length >= limits.maxResults){ state.truncated = true; return; }
+      if(steps.length >= limits.maxDepth) return;
+      var edges = edgesFrom(cur);
+      for(var k = 0; k < edges.length; k++){
+        var e = edges[k];
+        state.visits++;
+        if(state.visits > limits.maxVisits){ state.truncated = true; return; }
+        if(viaSet.size && !viaSet.has(e.kind)) continue;
+        var next = e.to;
+        if(next === start || visited.has(next)) continue;
+        steps.push({edge:e, to:next});
+        if(next === target){
+          out.push({start:start, steps:steps.slice()});
+          if(out.length >= limits.maxResults){ state.truncated = true; steps.pop(); return; }
+        } else {
+          visited.add(next);
+          walk(start, next, target, viaSet, visited, steps, out, limits, state);
+          visited.delete(next);
+        }
+        steps.pop();
+      }
+    }
+
+    function pathsWith(fromId, toId, limits, via){
+      var viaSet = new Set(via);
+      var out = [];
+      var state = {visits:0, truncated:false};
+      walk(fromId, fromId, toId, viaSet, new Set(), [], out, limits, state);
+      return {paths:out, truncated:state.truncated};
+    }
+
+    // Mirrors src/lib.rs Graph::paths_to_action_with: find every edge whose grant
+    // matches the pattern, then prepend the simple path that reaches its source,
+    // so the returned path always ends on the matching edge.
+    function pathsToActionWith(fromId, pattern, limits, via, onResource){
+      var viaSet = new Set(via);
+      var plimits = {maxDepth:Math.max(0, limits.maxDepth - 1), maxResults:limits.maxResults, maxVisits:limits.maxVisits};
+      var out = [];
+      var truncated = false;
+      var visits = 0;
+      for(var idx = 0; idx < EDGES.length; idx++){
+        if(truncated) break;
+        var e = EDGES[idx];
+        if(!e.action) continue;
+        if(!actionMatches(pattern, e.action)) continue;
+        if(!resourceOk(e.resource, onResource)) continue;
+        if(viaSet.size && !viaSet.has(e.kind)) continue;
+        var u = e.from, v = e.to;
+        if(v === fromId) continue;
+        if(u === fromId){
+          out.push({start:fromId, steps:[{edge:e, to:v}]});
+          if(out.length >= limits.maxResults) truncated = true;
+          continue;
+        }
+        var prefixes = [];
+        var pstate = {visits:visits, truncated:false};
+        walk(fromId, fromId, u, viaSet, new Set(), [], prefixes, plimits, pstate);
+        visits = pstate.visits;
+        if(pstate.truncated) truncated = true;
+        for(var pi = 0; pi < prefixes.length; pi++){
+          var p = prefixes[pi];
+          if(v === fromId || p.steps.some(function(s){ return s.to === v; })) continue;
+          var steps2 = p.steps.concat([{edge:e, to:v}]);
+          out.push({start:fromId, steps:steps2});
+          if(out.length >= limits.maxResults){ truncated = true; break; }
+        }
+      }
+      return {paths:out, truncated:truncated};
+    }
+
+    // Mirrors src/lib.rs Graph::escalation_from: BFS over (node, crossed) states,
+    // a boundary is a can_assume hop or a has_permission grant of an escalation
+    // primitive. Plain reachability never counts.
+    function escalationFrom(fromId){
+      var seen = new Set([fromId + "|0"]);
+      var emitted = new Set();
+      var out = [];
+      var q = [[fromId, false]];
+      while(q.length){
+        var cur = q.shift();
+        var curId = cur[0], crossed = cur[1];
+        var edges = edgesFrom(curId);
+        for(var i = 0; i < edges.length; i++){
+          var e = edges[i];
+          var next = e.to;
+          var boundary = e.kind === "can_assume" || (e.kind === "has_permission" && e.action && isEscalationAction(e.action));
+          var ncross = crossed || boundary;
+          var key = next + "|" + (ncross ? 1 : 0);
+          if(!seen.has(key)){
+            seen.add(key);
+            if(ncross && next !== fromId && isPrincipalKind(nodeKind(next)) && !emitted.has(next)){
+              emitted.add(next);
+              out.push(next);
+            }
+            q.push([next, ncross]);
+          }
+        }
+      }
+      return out;
+    }
+
+    // Mirrors src/lib.rs Graph::reachable_from: plain BFS, one visit per node.
+    function reachableFrom(fromId){
+      var seen = new Set([fromId]);
+      var out = [];
+      var q = [fromId];
+      while(q.length){
+        var cur = q.shift();
+        var edges = edgesFrom(cur);
+        for(var i = 0; i < edges.length; i++){
+          var next = edges[i].to;
+          if(!seen.has(next)){
+            seen.add(next);
+            out.push(next);
+            q.push(next);
+          }
+        }
+      }
+      return out;
+    }
+
+    function grantedActions(nodeId){
+      return edgesFrom(nodeId)
+        .filter(function(e){ return e.kind === "has_permission" && e.action; })
+        .map(function(e){ return e.action; });
+    }
+
+    function pathPrincipals(path){
+      var out = [];
+      if(isPrincipalKind(nodeKind(path.start))) out.push(path.start);
+      path.steps.forEach(function(s){
+        if(isPrincipalKind(nodeKind(s.to))) out.push(s.to);
+      });
+      return out.filter(function(v, i){ return out.indexOf(v) === i; });
+    }
+
+    // Mirrors src/technique.rs detect: translate the permissions each principal on
+    // the path actually holds into named exploit primitives, most severe first.
+    function detectTechniques(path){
+      var out = [];
+      pathPrincipals(path).forEach(function(idx){
+        var actions = grantedActions(idx);
+        if(!actions.length) return;
+        if(actions.indexOf("*") !== -1){
+          out.push({technique:"Full administrative access", severity:"critical", principal:idx});
+          return;
+        }
+        var lambda = actions.some(function(a){ return actionMatches("lambda:UpdateFunctionCode", a); });
+        var passrole = actions.some(function(a){ return actionMatches("iam:PassRole", a); });
+        if(lambda && passrole){
+          out.push({technique:"Lambda code injection (RCE)", severity:"critical", principal:idx});
+        } else if(passrole){
+          out.push({technique:"iam:PassRole privilege escalation", severity:"high", principal:idx});
+        }
+        if(actions.some(function(a){ return actionMatches("iam:UpdateLoginProfile", a); }) ||
+           actions.some(function(a){ return actionMatches("iam:CreateAccessKey", a); })){
+          out.push({technique:"Account takeover", severity:"high", principal:idx});
+        }
+        if(actions.some(function(a){ return actionMatches("iam:CreatePolicyVersion", a); }) ||
+           actions.some(function(a){ return actionMatches("iam:PutUserPolicy", a); }) ||
+           actions.some(function(a){ return actionMatches("iam:PutRolePolicy", a); })){
+          out.push({technique:"Policy injection", severity:"high", principal:idx});
+        }
+      });
+      return out;
+    }
+
+    function renderPaths(el, result){
+      if(!result.paths.length){
+        el.innerHTML = '<span class="muted2">No path found. That start cannot reach that capability in this graph.</span>';
+        return;
+      }
+      var html = "<div>Found " + result.paths.length + " path" + (result.paths.length === 1 ? "" : "s");
+      html += (result.truncated ? " (truncated at the result cap)" : "") + ".</div>";
+      result.paths.forEach(function(p){
+        html += '<div style="margin-top:14px">' + escapeHtml(nodeLabel(p.start));
+        p.steps.forEach(function(s){
+          var label = s.edge.action ? (s.edge.kind + " " + s.edge.action) : s.edge.kind;
+          if(s.edge.resource) label += " on " + s.edge.resource;
+          html += '<br>&nbsp;&nbsp;<span class="arrow">--' + escapeHtml(label) + '--&gt;</span> ';
+          html += '<span class="node">' + escapeHtml(nodeLabel(s.to)) + "</span>";
+        });
+        html += "</div>";
+        var techs = detectTechniques(p);
+        if(techs.length){
+          html += '<div style="margin-top:8px">';
+          techs.forEach(function(t){
+            html += escapeHtml(t.technique) + ' <span class="badge ' + escapeHtml(t.severity) + '">' + escapeHtml(t.severity) + "</span>";
+            html += " on " + escapeHtml(nodeLabel(t.principal)) + "<br>";
+          });
+          html += "</div>";
+        }
+      });
+      el.innerHTML = html;
+    }
+
+    function renderNodeList(el, nodes, emptyMsg){
+      if(!nodes.length){
+        el.innerHTML = '<span class="muted2">' + escapeHtml(emptyMsg) + "</span>";
+        return;
+      }
+      var html = "<div>" + nodes.length + " node" + (nodes.length === 1 ? "" : "s") + " reached.</div>";
+      html += '<div style="margin-top:10px">';
+      html += nodes.map(function(n){ return '<span class="node">' + escapeHtml(nodeLabel(n)) + "</span>"; }).join(", ");
+      html += "</div>";
+      el.innerHTML = html;
+    }
+
+    function setActiveButton(kind){
+      ["btnPaths", "btnEscalate", "btnBlast"].forEach(function(id){
+        document.getElementById(id).classList.remove("active");
+      });
+      var map = {paths:"btnPaths", escalate:"btnEscalate", blast:"btnBlast"};
+      document.getElementById(map[kind]).classList.add("active");
+    }
+
+    function runQuery(kind){
+      setActiveButton(kind);
+      var startId = document.getElementById("demoStart").value;
+      var targetVal = document.getElementById("demoTarget").value;
+      var oqlEl = document.getElementById("demoOql");
+      var outEl = document.getElementById("demoOut");
+      var limits = {maxDepth:8, maxResults:20, maxVisits:5000};
+
+      if(kind === "paths"){
+        var targetMode, targetArg;
+        if(targetVal.indexOf("action:") === 0){ targetMode = "action"; targetArg = targetVal.slice(7); }
+        else { targetMode = "node"; targetArg = targetVal.slice(5); }
+        var targetLiteral = targetMode === "action" ? ('action("' + targetArg + '")') : (nodeKind(targetArg) + '("' + targetArg + '")');
+        oqlEl.textContent = "PATHS FROM " + nodeKind(startId) + '("' + startId + '") TO ' + targetLiteral;
+        var result = targetMode === "action"
+          ? pathsToActionWith(startId, targetArg, limits, [], null)
+          : pathsWith(startId, targetArg, limits, []);
+        renderPaths(outEl, result);
+      } else if(kind === "escalate"){
+        oqlEl.textContent = "ESCALATE FROM " + nodeKind(startId) + '("' + startId + '")';
+        renderNodeList(outEl, escalationFrom(startId), "No principal reachable from here crosses a privilege boundary.");
+      } else {
+        oqlEl.textContent = "BLAST " + nodeKind(startId) + '("' + startId + '")';
+        renderNodeList(outEl, reachableFrom(startId), "Nothing is reachable from here.");
+      }
+    }
+
+    function buildLegend(){
+      var el = document.getElementById("demoLegend");
+      var html = "<div><b>Nodes</b><br>" + escapeHtml(NODES.map(function(n){ return nodeLabel(n.id); }).join(", ")) + "</div>";
+      html += '<div style="margin-top:10px"><b>Edges</b><br>';
+      html += EDGES.map(function(e){
+        var s = e.from + " --" + e.kind + (e.action ? (" " + e.action) : "") + "--> " + e.to;
+        return escapeHtml(s);
+      }).join("<br>");
+      html += "</div>";
+      el.innerHTML = html;
+    }
+
+    document.addEventListener("DOMContentLoaded", function(){
+      var startSel = document.getElementById("demoStart");
+      var targetSel = document.getElementById("demoTarget");
+
+      NODES.forEach(function(n){
+        var opt = document.createElement("option");
+        opt.value = n.id;
+        opt.textContent = nodeLabel(n.id);
+        startSel.appendChild(opt);
+      });
+
+      var actionGroup = document.createElement("optgroup");
+      actionGroup.label = "Action pattern";
+      ["iam:*", "s3:*", "secretsmanager:*", "*"].forEach(function(a){
+        var opt = document.createElement("option");
+        opt.value = "action:" + a;
+        opt.textContent = 'action("' + a + '")';
+        actionGroup.appendChild(opt);
+      });
+      targetSel.appendChild(actionGroup);
+
+      var nodeGroup = document.createElement("optgroup");
+      nodeGroup.label = "Specific node";
+      NODES.forEach(function(n){
+        var opt = document.createElement("option");
+        opt.value = "node:" + n.id;
+        opt.textContent = n.kind + '("' + n.id + '")';
+        nodeGroup.appendChild(opt);
+      });
+      targetSel.appendChild(nodeGroup);
+
+      startSel.value = "alice";
+      targetSel.value = "node:admin";
+
+      document.getElementById("btnPaths").addEventListener("click", function(){ runQuery("paths"); });
+      document.getElementById("btnEscalate").addEventListener("click", function(){ runQuery("escalate"); });
+      document.getElementById("btnBlast").addEventListener("click", function(){ runQuery("blast"); });
+
+      buildLegend();
+      runQuery("paths");
+    });
+  })();
+  </script>
 </body>
 </html>
