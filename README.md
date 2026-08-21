@@ -147,5 +147,6 @@ importer, structured JSON query results, exploit-technique detection, and an HTT
 API with a query-console UI, and an MCP server for agents. `ESCALATE` requires a real
 privilege-boundary crossing, path search is compute-bounded, and a grant whose resource
 ARN is an identity in the account resolves to that identity, so PassRole escalation
-traverses on real imported data. Next: Deny/NotAction evaluation, and mapping Service and
-Federated trust principals so a compromised Lambda assuming its role shows as a path.
+traverses on real imported data. Service and Federated trust principals are modeled, so a
+compromised Lambda assuming its role shows as a path, and the API has a request timeout.
+Next: Deny/NotAction evaluation.

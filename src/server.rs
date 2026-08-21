@@ -60,8 +60,21 @@ async fn get_graph(State(s): State<Arc<AppState>>) -> Json<Value> {
 }
 
 async fn post_query(State(s): State<Arc<AppState>>, Json(req): Json<QueryReq>) -> impl IntoResponse {
-    match s.graph.run_oql(&req.oql) {
-        Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))),
+    // Run the CPU-bound query off the async pool, with a wall-clock ceiling. The
+    // engine's visit budget already bounds work; this is defense in depth.
+    let state = s.clone();
+    let oql = req.oql;
+    let task = tokio::task::spawn_blocking(move || state.graph.run_oql(&oql));
+    match tokio::time::timeout(std::time::Duration::from_secs(3), task).await {
+        Ok(Ok(Ok(v))) => (StatusCode::OK, Json(v)),
+        Ok(Ok(Err(e))) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))),
+        Ok(Err(_)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "query task failed" })),
+        ),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(json!({ "error": "query timed out" })),
+        ),
     }
 }

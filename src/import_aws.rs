@@ -359,15 +359,32 @@ impl<'a> Builder<'a> {
             if !st.effect.eq_ignore_ascii_case("Allow") {
                 continue;
             }
-            if !st.action.iter().any(|a| a.eq_ignore_ascii_case("sts:AssumeRole")) {
+            // sts:AssumeRole (AWS), AssumeRoleWithSAML (Federated), AssumeRoleWithWebIdentity (OIDC/Service).
+            if !st.action.iter().any(|a| {
+                let a = a.to_ascii_lowercase();
+                a.starts_with("sts:assumerole")
+            }) {
                 continue;
             }
-            for arn in principal_arns(&st.principal) {
-                // Resolve to an in-account node, else create an external principal.
-                let from = self.arn_to_id.get(&arn).cloned().unwrap_or_else(|| {
-                    self.add_node(arn.clone(), "external");
-                    arn.clone()
-                });
+            for (ptype, value) in principal_entries(&st.principal) {
+                // AWS principals resolve to an in-account identity (else external).
+                // Service (e.g. lambda.amazonaws.com) and Federated (SAML/OIDC)
+                // principals become their own nodes: a compromised Lambda assuming
+                // its trusted role is a real attack path.
+                let from = match ptype.as_str() {
+                    "AWS" => self.arn_to_id.get(&value).cloned().unwrap_or_else(|| {
+                        self.add_node(value.clone(), "external");
+                        value.clone()
+                    }),
+                    "Service" => {
+                        self.add_node(value.clone(), "service");
+                        value.clone()
+                    }
+                    _ => {
+                        self.add_node(value.clone(), "federated");
+                        value.clone()
+                    }
+                };
                 self.edges.push(Edge {
                     from,
                     to: role_id.to_string(),
@@ -381,23 +398,28 @@ impl<'a> Builder<'a> {
     }
 }
 
-/// Pull the `AWS` principal ARNs out of a trust statement's `Principal` block.
-fn principal_arns(principal: &Option<Value>) -> Vec<String> {
+/// Pull principals out of a trust statement's `Principal` block, tagged by type
+/// (`AWS`, `Service`, `Federated`). `"Principal": "*"` becomes an AWS wildcard.
+fn principal_entries(principal: &Option<Value>) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    if let Some(Value::Object(map)) = principal {
-        if let Some(aws) = map.get("AWS") {
-            match aws {
-                Value::String(s) => out.push(s.clone()),
-                Value::Array(a) => {
-                    for v in a {
-                        if let Value::String(s) = v {
-                            out.push(s.clone());
+    match principal {
+        Some(Value::Object(map)) => {
+            for key in ["AWS", "Service", "Federated"] {
+                match map.get(key) {
+                    Some(Value::String(s)) => out.push((key.to_string(), s.clone())),
+                    Some(Value::Array(a)) => {
+                        for v in a {
+                            if let Value::String(s) = v {
+                                out.push((key.to_string(), s.clone()));
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
+        Some(Value::String(s)) if s == "*" => out.push(("AWS".into(), "*".into())),
+        _ => {}
     }
     out
 }
@@ -458,6 +480,34 @@ mod tests {
         ],
         "Policies": []
     }"#;
+
+    #[test]
+    fn service_trust_becomes_an_attack_path() {
+        // A role whose trust allows the Lambda service to assume it. A compromised
+        // Lambda is then a route into that role.
+        let j = r#"{
+            "UserDetailList": [], "GroupDetailList": [], "Policies": [],
+            "RoleDetailList": [
+                { "RoleName": "lambda-exec", "Arn": "arn:aws:iam::123456789012:role/lambda-exec",
+                  "AssumeRolePolicyDocument": { "Version": "2012-10-17", "Statement": [
+                    { "Effect": "Allow", "Principal": { "Service": "lambda.amazonaws.com" },
+                      "Action": "sts:AssumeRole" }] },
+                  "AttachedManagedPolicies": [], "RolePolicyList": [] }
+            ]
+        }"#;
+        let doc = import(j).unwrap();
+        assert!(doc.nodes.iter().any(|n| n.kind == "service" && n.id == "lambda.amazonaws.com"));
+        let g = Graph::from_json(&doc.to_json_pretty().unwrap()).unwrap();
+        let r = g
+            .paths_with(
+                "lambda.amazonaws.com",
+                "lambda-exec",
+                crate::Limits::default(),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(r.paths.len(), 1);
+    }
 
     #[test]
     fn passrole_links_to_role_identity() {

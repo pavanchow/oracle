@@ -1,0 +1,81 @@
+{
+  "nodes": [
+    {
+      "id": "alice",
+      "kind": "user"
+    },
+    {
+      "id": "developers",
+      "kind": "group"
+    },
+    {
+      "id": "deployer",
+      "kind": "role"
+    },
+    {
+      "id": "*",
+      "kind": "resource"
+    },
+    {
+      "id": "arn:aws:s3:::prod-artifacts",
+      "kind": "resource"
+    },
+    {
+      "id": "arn:aws:s3:::prod-artifacts/*",
+      "kind": "resource"
+    }
+  ],
+  "edges": [
+    {
+      "from": "alice",
+      "to": "developers",
+      "kind": "member_of"
+    },
+    {
+      "from": "developers",
+      "to": "arn:aws:s3:::prod-artifacts",
+      "kind": "has_permission",
+      "action": "s3:ListBucket",
+      "resource": "arn:aws:s3:::prod-artifacts"
+    },
+    {
+      "from": "developers",
+      "to": "deployer",
+      "kind": "has_permission",
+      "action": "sts:AssumeRole",
+      "resource": "arn:aws:iam::123456789012:role/deployer"
+    },
+    {
+      "from": "deployer",
+      "to": "*",
+      "kind": "has_permission",
+      "action": "logs:*",
+      "resource": "*"
+    },
+    {
+      "from": "deployer",
+      "to": "arn:aws:s3:::prod-artifacts/*",
+      "kind": "has_permission",
+      "action": "s3:GetObject",
+      "resource": "arn:aws:s3:::prod-artifacts/*"
+    },
+    {
+      "from": "deployer",
+      "to": "arn:aws:s3:::prod-artifacts/*",
+      "kind": "has_permission",
+      "action": "s3:PutObject",
+      "resource": "arn:aws:s3:::prod-artifacts/*",
+      "conditions": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "from": "alice",
+      "to": "deployer",
+      "kind": "can_assume",
+      "action": "sts:AssumeRole"
+    }
+  ]
+}

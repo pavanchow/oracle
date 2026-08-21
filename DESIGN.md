@@ -105,9 +105,12 @@ BLAST role("deployer")
     this account (a role targeted by iam:PassRole, etc.) resolves to that identity
     node instead of a dead-end resource node, so escalation traverses the final hop
     on real imported graphs.
-11. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
-12. Trust principals beyond AWS: map `Service` and `Federated` trust to nodes, so a
-    compromised Lambda assuming its trusted role shows up as an attack path.
+11. Trust principals beyond AWS (done): `Service` (e.g. lambda.amazonaws.com) and
+    `Federated` (SAML/OIDC) trust become their own nodes with `can_assume` edges, so
+    a compromised Lambda assuming its trusted role shows up as an attack path.
+12. API request timeout (done): `/query` runs off the async pool with a 3s ceiling
+    (504 on timeout), on top of the engine's visit budget.
+13. Deny/NotAction evaluation. Big: needs SCP and session-boundary parsing.
 
 ## IAM model (implemented, ready for the importer)
 
