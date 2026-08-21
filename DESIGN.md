@@ -88,9 +88,11 @@ BLAST role("deployer")
    `BLAST`, node and `action(...)` targets, `VIA` edge filter, `WITHIN n HOPS`.
 3. AWS IAM importer (done): consumes `aws iam get-account-authorization-details`
    and emits the graph. See `src/import_aws.rs` and `data/aws-authdetails-sample.json`.
-4. Deny/NotAction evaluation and escalation-technique rules (auto-detect bundles).
-5. axum API, then the graph visualization UI.
-6. MCP server for agent access.
+4. HTTP API (done): axum server, `run_oql` returns structured JSON. `GET /health`,
+   `GET /graph`, `POST /query`. See `src/server.rs`.
+5. Graph visualization UI on top of the API.
+6. Deny/NotAction evaluation and escalation-technique rules (auto-detect bundles).
+7. MCP server for agent access.
 
 ## IAM model (implemented, ready for the importer)
 

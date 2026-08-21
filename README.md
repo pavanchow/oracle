@@ -50,6 +50,20 @@ The importer builds users, groups, roles and resource nodes, `member_of` edges,
 action, resource ARN, and any `Condition` block. `Deny` and `NotAction`/`NotResource`
 are not evaluated yet, so results are potential paths.
 
+## HTTP API
+
+Serve the engine over HTTP so a UI or an agent can query it:
+
+```
+cargo run -- serve --graph aws-graph.json --port 8080
+curl -s localhost:8080/query -H 'content-type: application/json' \
+  -d '{"oql":"PATHS FROM user(\"alice\") TO action(\"*\")"}'
+```
+
+- `GET /health` liveness.
+- `GET /graph` the loaded graph JSON (for visualization).
+- `POST /query {"oql":"..."}` structured result, or 400 with `{"error":...}`.
+
 ## OQL
 
 - `PATHS FROM <node> TO <node>` every attack path between two nodes.
@@ -82,5 +96,6 @@ JSON graph format, `clap` for the CLI. Path search is bounded (default 8 hops,
 
 Working: graph model, JSON loader, edge-aware bounded attack-path engine, the OQL
 parser (`PATHS`, `ESCALATE`, `BLAST`, `VIA`, `WITHIN`, `ON resource`), the AWS IAM
-importer, and a CLI. Next: Deny/NotAction evaluation and escalation-technique rules,
-then the HTTP API and graph visualization UI, then an MCP server.
+importer, structured JSON query results, and an HTTP API. Next: a graph
+visualization UI on top of the API, Deny/NotAction evaluation and
+escalation-technique rules, then an MCP server.

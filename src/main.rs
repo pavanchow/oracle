@@ -41,6 +41,13 @@ enum Cmd {
         #[arg(long)]
         output: Option<String>,
     },
+    /// Serve the HTTP API over a graph (POST /query, GET /graph, GET /health).
+    Serve {
+        #[arg(long, default_value = "data/sample-graph.json")]
+        graph: String,
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
 }
 
 fn print_paths(g: &Graph, r: &PathSet) {
@@ -134,6 +141,9 @@ fn main() -> Result<()> {
                 }
                 None => println!("{out}"),
             }
+        }
+        Cmd::Serve { graph, port } => {
+            oracle::server::serve(&graph, port)?;
         }
     }
     Ok(())

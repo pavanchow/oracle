@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 pub mod import_aws;
 pub mod query;
+pub mod server;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -292,6 +293,79 @@ impl Graph {
 
     pub fn node_kind_of(&self, idx: NodeIndex) -> &str {
         &self.g[idx].kind
+    }
+
+    /// One attack path as a JSON value: a start node and edge-labeled hops.
+    pub fn path_json(&self, p: &AttackPath) -> serde_json::Value {
+        let hops: Vec<serde_json::Value> = p
+            .steps
+            .iter()
+            .map(|s| {
+                let e = &self.g[s.edge];
+                serde_json::json!({
+                    "edge": e.kind,
+                    "action": e.action,
+                    "resource": e.resource,
+                    "conditional": e.conditions.as_ref().is_some_and(|c| !c.is_empty()),
+                    "to": self.node_label(s.to),
+                })
+            })
+            .collect();
+        serde_json::json!({ "start": self.node_label(p.start), "hops": hops })
+    }
+
+    /// Parse and run an OQL query, returning a structured JSON result. Shared by
+    /// the CLI (`--json`) and the HTTP API.
+    pub fn run_oql(&self, oql: &str) -> Result<serde_json::Value> {
+        use crate::query::{parse, Query, Target};
+        Ok(match parse(oql)? {
+            Query::Paths {
+                from_id,
+                to,
+                via,
+                within,
+                on_resource,
+                ..
+            } => {
+                let mut limits = Limits::default();
+                if let Some(h) = within {
+                    limits.max_depth = h;
+                }
+                let r = match to {
+                    Target::Node { id, .. } => self.paths_with(&from_id, &id, limits, &via)?,
+                    Target::Action(pat) => self.paths_to_action_with(
+                        &from_id,
+                        &pat,
+                        limits,
+                        &via,
+                        on_resource.as_deref(),
+                    )?,
+                };
+                serde_json::json!({
+                    "kind": "paths",
+                    "count": r.paths.len(),
+                    "truncated": r.truncated,
+                    "paths": r.paths.iter().map(|p| self.path_json(p)).collect::<Vec<_>>(),
+                })
+            }
+            Query::Escalate { from_id, .. } => {
+                let nodes: Vec<String> = self
+                    .reachable_from(&from_id)?
+                    .into_iter()
+                    .filter(|&n| matches!(self.node_kind_of(n), "user" | "group" | "role"))
+                    .map(|n| self.node_label(n))
+                    .collect();
+                serde_json::json!({ "kind": "identities", "count": nodes.len(), "nodes": nodes })
+            }
+            Query::Blast { from_id, .. } => {
+                let nodes: Vec<String> = self
+                    .reachable_from(&from_id)?
+                    .into_iter()
+                    .map(|n| self.node_label(n))
+                    .collect();
+                serde_json::json!({ "kind": "reach", "count": nodes.len(), "nodes": nodes })
+            }
+        })
     }
 
     /// Render one attack path, showing the exact edge that enabled each hop and
