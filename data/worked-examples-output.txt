@@ -1,0 +1,21 @@
+$ oracle query 'PATHS FROM user("contractor") TO resource("customer-pii")'
+1 attack path(s):
+
+[1] user:contractor --[member_of]--> group:vendors --[has_permission s3:GetObject on arn:aws:s3:::customer-pii/*]--> resource:customer-pii
+
+$ oracle query 'ESCALATE FROM role("ci-runner")'
+2 identit(ies) reachable from ci-runner:
+  role:deployer
+  role:admin
+
+$ oracle query 'PATHS FROM host("bastion") TO host("db") VIA network'
+1 attack path(s):
+
+[1] host:bastion --[network tcp:22]--> host:app --[network tcp:5432]--> host:db
+
+$ oracle query 'BLAST role("deployer")'
+deployer can reach 4 node(s):
+  resource:secrets
+  resource:artifacts
+  role:admin
+  resource:all

@@ -1,0 +1,30 @@
+{
+  "nodes": [
+    { "id": "contractor", "kind": "user" },
+    { "id": "vendors", "kind": "group" },
+    { "id": "ci-runner", "kind": "role" },
+    { "id": "deployer", "kind": "role" },
+    { "id": "admin", "kind": "role" },
+    { "id": "bastion", "kind": "host" },
+    { "id": "app", "kind": "host" },
+    { "id": "db", "kind": "host" },
+    { "id": "customer-pii", "kind": "resource" },
+    { "id": "artifacts", "kind": "resource" },
+    { "id": "secrets", "kind": "resource" },
+    { "id": "all", "kind": "resource" }
+  ],
+  "edges": [
+    { "from": "contractor", "to": "vendors", "kind": "member_of" },
+    { "from": "vendors", "to": "customer-pii", "kind": "has_permission", "action": "s3:GetObject", "resource": "arn:aws:s3:::customer-pii/*" },
+
+    { "from": "ci-runner", "to": "deployer", "kind": "can_assume", "action": "sts:AssumeRole" },
+    { "from": "deployer", "to": "admin", "kind": "has_permission", "action": "iam:PutRolePolicy" },
+    { "from": "admin", "to": "all", "kind": "has_permission", "action": "*", "resource": "arn:aws:*" },
+
+    { "from": "deployer", "to": "artifacts", "kind": "has_permission", "action": "s3:PutObject", "resource": "arn:aws:s3:::artifacts/*" },
+    { "from": "deployer", "to": "secrets", "kind": "has_permission", "action": "secretsmanager:GetSecretValue" },
+
+    { "from": "bastion", "to": "app", "kind": "network", "action": "tcp:22" },
+    { "from": "app", "to": "db", "kind": "network", "action": "tcp:5432" }
+  ]
+}
