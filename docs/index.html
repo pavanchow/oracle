@@ -160,6 +160,21 @@
     </div>
   </div>
 
+  <section id="run">
+    <h2>One query, the whole chain.</h2>
+    <p class="lead">A real run against the synthetic identity graph the repo ships in <code>data/sample-graph.json</code>.</p>
+    <div class="q" style="max-width:900px;margin-top:38px">
+<span class="cm">$ cargo run -- query 'PATHS FROM user("alice") TO action("*")'</span><br>
+5 attack path(s):<br><br>
+[1] user:alice <span class="arrow">--[member_of]--&gt;</span> group:developers <span class="arrow">--[can_assume sts:AssumeRole]--&gt;</span> role:build-runner<br>
+[2] user:alice <span class="arrow">--[member_of]--&gt;</span> group:developers <span class="arrow">--[can_assume sts:AssumeRole]--&gt;</span> role:build-runner <span class="arrow">--[can_assume sts:AssumeRole]--&gt;</span> role:deployer<br>
+[3] user:alice <span class="arrow">...</span> role:deployer <span class="arrow">--[has_permission s3:*]--&gt;</span> resource:prod-artifacts<br>
+[4] user:alice <span class="arrow">...</span> role:deployer <span class="arrow">--[has_permission iam:PutRolePolicy]--&gt;</span> role:admin<br>
+[5] user:alice <span class="arrow">...</span> role:admin <span class="arrow">--[has_permission *]--&gt;</span> resource:all-resources
+    </div>
+    <p class="lead" style="font-size:15px">Path 5 is the full escalation: alice reaches a role that holds <code>*</code>, so every resource is in reach. The chain, not just the verdict.</p>
+  </section>
+
   <section id="how">
     <h2>How it differs</h2>
     <div class="rows">
