@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Oracle: a query language whose results are attack paths across identity and network graphs</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
   <meta name="description" content="Oracle is a query language whose results are attack paths across identity and network graphs. AWS IAM privilege escalation and lateral movement. By Pavan Nallamothu (pavanchow).">
   <meta name="author" content="Pavan Nallamothu (pavanchow)">
   <meta name="keywords" content="attack path query language, IAM attack paths, cloud privilege escalation, identity graph, AWS IAM security, lateral movement, Pavan Nallamothu, pavanchow">
@@ -72,6 +73,7 @@
     .demo .badge.high{background:var(--high);color:#fff}
     .demo details{margin-top:16px;font-size:13px;color:var(--muted)}
     .demo details summary{cursor:pointer;font-family:var(--mono);color:var(--accent)}
+    .demo details.howto p{margin:12px 0 0;line-height:1.6}
     .demo .legend-list{margin-top:10px;line-height:1.9;font-family:var(--mono);font-size:12.5px}
 
     section{padding:92px 0;border-top:1px solid var(--line)}
@@ -109,6 +111,7 @@
   </div></nav>
 
   <div id="ask" class="hero">
+    <img src="logo.svg" alt="Oracle logo" width="72" height="72">
     <p class="eyebrow">Attack paths, not rows</p>
     <h1>Ask how they get in.<br>Get the path back.</h1>
     <p class="sub">Oracle is a query language whose results are attack paths across identity and network graphs. Ask how a principal can reach a capability, and Oracle returns the concrete chain of permissions and trust that gets them there, hop by hop, with the exact edge behind each step.</p>
@@ -145,6 +148,10 @@
         </div>
         <p class="oql" id="demoOql"></p>
         <div class="out" id="demoOut"></div>
+        <details class="howto">
+          <summary>How to use this playground</summary>
+          <p>Pick a <strong>start principal</strong> and, for path queries, a <strong>target capability</strong>, then run one of the three query kinds. <strong>PATHS</strong> shows every route from that principal to the target, hop by hop. <strong>ESCALATE</strong> finds routes to administrative power. <strong>BLAST</strong> shows everything the principal can already reach. The compiled OQL query and its result render live below, using the same engine as the Rust tool.</p>
+        </details>
         <details>
           <summary>The graph this is searching</summary>
           <div class="legend-list" id="demoLegend"></div>

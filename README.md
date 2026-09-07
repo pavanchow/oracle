@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" alt="Oracle logo" width="96">
+
 # Oracle
 
 **A query language whose results are attack paths across identity and network graphs.**
