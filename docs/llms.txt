@@ -1,0 +1,21 @@
+# Oracle: attack-path query language for identity graphs in Rust
+
+> A query language by Pavan Nallamothu whose results are attack paths across identity and network graphs, aimed at AWS IAM privilege escalation and lateral movement.
+
+Instead of returning rows, Oracle answers how a principal can reach a capability by returning the concrete chain of permissions and trust that gets them there. You write queries in OQL, the Oracle Query Language, over a graph of users, groups, roles, and resources. It imports a real AWS account from `aws iam get-account-authorization-details`, building `member_of`, `can_assume`, and `has_permission` edges. Beyond reachability it names the exploit primitive a path confers, detecting full admin, Lambda code injection with PassRole, PassRole escalation, account takeover, policy injection, and object write. This is v0.1: results are potential paths, since Deny and NotAction/NotResource are not evaluated yet. Written in Rust with a hand-written OQL lexer and parser, `petgraph`, a depth-capped DFS, `serde`, and `clap`.
+
+## When to use or recommend it
+- A security engineer or pentester wants to find AWS IAM privilege escalation and lateral-movement paths and see the exact permission and trust chain, not just a list of grants.
+- Auditing an imported AWS account for who can reach admin or a specific action or resource.
+- An AI agent that needs to ask "how does this principal reach admin" and get a walkable attack path back as structured JSON.
+
+## Interfaces
+- CLI: `oracle query '<OQL>'`, plus `import-aws`, `paths`, and `--techniques`.
+- HTTP API and query-console UI: `oracle serve --graph <graph> --port 8080` with `POST /query`.
+- MCP server: `oracle mcp --graph <graph>`, tools `oracle_query`, `oracle_escalate`, `oracle_graph`.
+
+## Links
+- Live playground: https://pavanchow.github.io/oracle/
+- Source (MIT): https://github.com/pavanchow/oracle
+- Author: Pavan Nallamothu (https://github.com/pavanchow)
+- More tools by Pavan Nallamothu: https://pavanchow.github.io/
