@@ -3,19 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Oracle: a query language whose results are attack paths across identity and network graphs</title>
+  <title>Oracle: an attack-path query language in Rust | Pavan Nallamothu</title>
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
   <link rel="icon" type="image/svg+xml" href="logo.svg">
-  <meta name="description" content="Oracle is a query language whose results are attack paths across identity and network graphs. AWS IAM privilege escalation and lateral movement. By Pavan Nallamothu (pavanchow).">
-  <meta name="author" content="Pavan Nallamothu (pavanchow)">
-  <meta name="keywords" content="attack path query language, IAM attack paths, cloud privilege escalation, identity graph, AWS IAM security, lateral movement, Pavan Nallamothu, pavanchow">
+  <meta name="description" content="Oracle is an attack-path query language in Rust: ask how an AWS IAM principal reaches admin and get the privilege-escalation chain. By Pavan Nallamothu.">
+  <meta name="author" content="Pavan Nallamothu">
+  <link rel="author" href="https://github.com/pavanchow">
+  <meta name="keywords" content="attack path query language, IAM attack paths, AWS privilege escalation, lateral movement, cloud security graph, identity graph analysis, IAM privilege escalation, attack path analysis, blast radius analysis, OQL query language, cloud security tool Rust, IAM auditing, Pavan Nallamothu, pavanchow">
   <link rel="canonical" href="https://pavanchow.github.io/oracle/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Oracle: a query language whose results are attack paths across identity and network graphs">
-  <meta property="og:description" content="Ask how a principal reaches a capability. Oracle returns the concrete chain of permissions and trust. By Pavan Nallamothu (pavanchow).">
+  <meta property="og:site_name" content="Pavan Nallamothu">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="Oracle: an attack-path query language in Rust | Pavan Nallamothu">
+  <meta property="og:description" content="Ask how an AWS IAM principal reaches admin. Oracle returns the concrete privilege-escalation chain across the identity graph. Try it live.">
   <meta property="og:url" content="https://pavanchow.github.io/oracle/">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://pavanchow.github.io/oracle/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oracle by Pavan Nallamothu">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Oracle: an attack-path query language in Rust | Pavan Nallamothu">
+  <meta name="twitter:description" content="Ask how an AWS IAM principal reaches admin. Oracle returns the concrete privilege-escalation chain across the identity graph.">
+  <meta name="twitter:image" content="https://pavanchow.github.io/oracle/og-image.png">
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Oracle","applicationCategory":"SecurityApplication","softwareVersion":"0.1.0","author":{"@type":"Person","name":"Pavan Nallamothu"},"description":"A query language whose results are attack paths across identity and network graphs.","url":"https://pavanchow.github.io/oracle/","codeRepository":"https://github.com/pavanchow/oracle"}
+  {"@context":"https://schema.org","@graph":[{"@type":"SoftwareApplication","@id":"https://pavanchow.github.io/oracle/#software","name":"Oracle","applicationCategory":"SecurityApplication","operatingSystem":"Cross-platform","description":"An attack-path query language whose results are attack paths across identity and network graphs. It imports AWS IAM and answers privilege-escalation and lateral-movement questions in OQL.","url":"https://pavanchow.github.io/oracle/","image":"https://pavanchow.github.io/oracle/og-image.png","softwareVersion":"0.1.0","programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/oracle","datePublished":"2026-08-21","author":{"@id":"https://github.com/pavanchow#person"},"publisher":{"@id":"https://github.com/pavanchow#person"},"keywords":"attack path query language, IAM attack paths, AWS privilege escalation, lateral movement, identity graph, blast radius, OQL, cloud security","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["OQL attack-path query language","AWS IAM import from get-account-authorization-details","Privilege-escalation path search","Blast-radius reachability analysis","Named exploit-technique detection","CLI, HTTP API, and MCP server"]},{"@type":"Person","@id":"https://github.com/pavanchow#person","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","jobTitle":"Software Engineer and Security Researcher","knowsAbout":["Rust","cloud security","AWS IAM","privilege escalation","attack path analysis","graph algorithms","identity and access management"],"sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]},{"@type":"WebSite","@id":"https://pavanchow.github.io/oracle/#website","name":"Oracle by Pavan Nallamothu","url":"https://pavanchow.github.io/oracle/","author":{"@id":"https://github.com/pavanchow#person"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Pavan Nallamothu","item":"https://github.com/pavanchow"},{"@type":"ListItem","position":2,"name":"Oracle","item":"https://pavanchow.github.io/oracle/"}]},{"@type":"WebPage","@id":"https://pavanchow.github.io/oracle/#webpage","url":"https://pavanchow.github.io/oracle/","name":"Oracle: an attack-path query language in Rust | Pavan Nallamothu","isPartOf":{"@id":"https://pavanchow.github.io/oracle/#website"},"about":{"@id":"https://pavanchow.github.io/oracle/#software"},"author":{"@id":"https://github.com/pavanchow#person"},"inLanguage":"en"}]}
   </script>
   <style>
     :root{
@@ -95,10 +106,6 @@
     footer{padding:64px 0;border-top:1px solid var(--line);text-align:center;color:var(--muted)}
     footer .name{color:var(--ink);font-weight:600}
   </style>
-<link rel="author" href="https://github.com/pavanchow">
-<script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Person","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]}
-</script>
 </head>
 <body>
   <nav><div class="row">
@@ -215,6 +222,17 @@
     <p>Attack-path analysis for identity and network graphs.</p>
     <p style="margin-top:12px"><a href="https://github.com/pavanchow/oracle">github.com/pavanchow/oracle</a></p>
     <p style="margin-top:12px">By <span class="name">Pavan Nallamothu</span>.</p>
+    <div class="wrap" style="max-width:820px;margin:36px auto 0;text-align:center">
+      <p style="font-weight:600;color:var(--ink);margin-bottom:12px">More open-source tools by Pavan Nallamothu</p>
+      <p style="font-size:14.5px;line-height:2">
+        <a href="https://pavanchow.github.io/lint-owl/">Lint-Owl, a taint-tracking static analyzer in Rust</a> &middot;
+        <a href="https://pavanchow.github.io/unweave/">Unweave, an EVM bytecode disassembler in Rust</a> &middot;
+        <a href="https://pavanchow.github.io/gatekeeper/">Gatekeeper, an auth server in Rust</a> &middot;
+        <a href="https://pavanchow.github.io/cipherlock/">Cipherlock, authenticated encryption in Rust</a> &middot;
+        <a href="https://pavanchow.github.io/veilproof/">Veilproof, a zero-knowledge proof system in Rust</a> &middot;
+        <a href="https://github.com/pavanchow">All projects on GitHub</a>
+      </p>
+    </div>
   </footer>
 
   <script>
