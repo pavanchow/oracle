@@ -6,6 +6,8 @@ Oracle is a query language written in Rust whose results are attack paths across
 
 **[Live demo](https://pavanchow.github.io/oracle/)** · MIT licensed · written in Rust
 
+Built from scratch by [Pavan Nallamothu](https://pavanchow.github.io/) ([LinkedIn](https://www.linkedin.com/in/pavanchow/), [GitHub](https://github.com/pavanchow)).
+
 See [DESIGN.md](DESIGN.md) for the model, the query language, and the roadmap.
 
 ## Build
